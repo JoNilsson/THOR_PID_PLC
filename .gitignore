@@ -1,0 +1,29 @@
+# CircuitPython specific
+lib/
+examples/
+boot_out.txt
+bundle.txt
+modules/
+
+# System files
+System Volume Information/
+.Trashes
+.metadata_never_index
+.fseventsd
+.Spotlight-V100
+__pycache__/
+.DS_Store
+
+# Editor files
+.vscode/
+.theia/
+*~
+.idea/
+
+# Project specific
+settings.toml
+
+# Allow your own files
+# !code.py
+# !custom_modules/*.py
+.Trash-1000
