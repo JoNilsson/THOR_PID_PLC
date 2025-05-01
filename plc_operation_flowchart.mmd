@@ -1,0 +1,96 @@
+flowchart TD
+    %% Define node styles
+    classDef idleState fill:#AED6F1,stroke:#000000
+    classDef checkState fill:#F7DC6F,stroke:#000000
+    classDef armedState fill:#03F333,stroke:#000000
+    classDef warmupState fill:#F5CBA7,stroke:#000000
+    classDef fullpowerState fill:#ABEBC6,stroke:#000000
+    classDef errorState fill:#FF90A1,stroke:#000000
+    classDef shutdownState fill:#D7BDE2,stroke:#000000
+    classDef decisionPoint fill:#D2B4DE,stroke:#000000,shape:diamond
+
+    %% Define main nodes
+    IDLE[IDLE]:::idleState
+    SELF_CHECK["SELF CHECK<br>Green Light Flashing"]:::checkState
+    SYSTEM_ARMED["SYSTEM ARMED<br>Green Light Solid"]:::armedState
+    WARM_UP_FLASH["WARM-UP RAMP<br>Amber Light Flashing"]:::warmupState
+    WARM_UP_STEADY["WARM-UP COMPLETE<br>Amber Light Steady"]:::warmupState
+    FULL_TEMP_FLASH["FULL-TEMP RAMP<br>Blue Light Flashing"]:::fullpowerState
+    FULL_TEMP_STEADY["TARGET TEMP REACHED<br>Blue Light Steady"]:::fullpowerState
+    ERROR["ERROR<br>Red Light Flashing"]:::errorState
+    SHUTDOWN["SHUTDOWN<br>Graceful Ramp-Down"]:::shutdownState
+    
+    %% Decision diamonds
+    InitializeBtn[/"INITIALIZE Button (GREEN)"/]:::decisionPoint
+    StartBtn[/"START Button (AMBER)"/]:::decisionPoint
+    SelfCheckResult[/"Self Check Pass?"/]:::decisionPoint
+    WarmUpComplete[/"Warm-Up Complete?"/]:::decisionPoint
+    TargetTempReached[/"Target Temp Reached?"/]:::decisionPoint
+    ESTOP[/"E-STOP Button (RED)"/]:::decisionPoint
+    
+    %% Define main flow
+    IDLE --> InitializeBtn
+    InitializeBtn -- "Pressed" --> SELF_CHECK
+    
+    %% Self-check flow
+    SELF_CHECK --> SelfCheckResult
+    SelfCheckResult -- "Yes" --> SYSTEM_ARMED --> StartBtn
+    SelfCheckResult -- "No" --> ERROR
+    
+    %% Start button after self-check
+    StartBtn -- "Pressed" --> WARM_UP_FLASH
+    
+    %% Warm-up flow
+    WARM_UP_FLASH --> WarmUpComplete
+    WARM_UP_FLASH --> StartBtn
+    StartBtn -- "Pressed during warm-up" --> SHUTDOWN
+    WarmUpComplete -- "Yes" --> WARM_UP_STEADY
+    WarmUpComplete -- "No" --> WARM_UP_FLASH
+    WARM_UP_STEADY --> StartBtn
+    
+    %% Full-temp flow after warm-up complete
+    StartBtn -- "Pressed after warm-up complete" --> FULL_TEMP_FLASH
+    FULL_TEMP_FLASH --> TargetTempReached
+    TargetTempReached -- "Yes" --> FULL_TEMP_STEADY
+    TargetTempReached -- "No" --> FULL_TEMP_FLASH
+    FULL_TEMP_STEADY -- "Pressed after full-temp reached" --> SHUTDOWN
+    
+    %% Error and shutdown return to idle
+    ERROR --> IDLE
+    SHUTDOWN --> IDLE
+    
+    %% E-STOP connection from active states
+    SELF_CHECK --> ESTOP
+    WARM_UP_FLASH --> ESTOP
+    WARM_UP_STEADY --> ESTOP
+    FULL_TEMP_FLASH --> ESTOP
+    FULL_TEMP_STEADY --> ESTOP
+    SHUTDOWN --> ESTOP
+    ESTOP -- "Pressed" --> ERROR
+    
+    %% Title with increased font size
+    MainTitle["THOR PLC Temperature Control System Logic Flowchart"]
+    style MainTitle font-size:24px,fill:none,stroke:none
+    MainTitle --> IDLE
+    
+    %% Legend subgraph
+    subgraph Legend ["Legend"]
+        direction LR
+        L_Idle["Idle State"]:::idleState
+        L_Check["Self Check State"]:::checkState
+        L_Armed["System Armed State"]:::armedState
+        L_Warmup["Warm-Up State"]:::warmupState
+        L_FullPower["Full-Power State"]:::fullpowerState
+        L_Error["Error State"]:::errorState
+        L_Shutdown["Shutdown State"]:::shutdownState
+        L_Decision[/"Decision Point"/]:::decisionPoint
+    end
+    
+    %% Button Legend 
+    subgraph Buttons ["Control Buttons"]
+        direction LR
+        B_ESTOP["E-STOP (RED)<br>Emergency Stop"]:::errorState
+        B_INIT["INITIALIZE (GREEN)<br>System Arming"]:::fullpowerState
+        B_START["START (AMBER)<br>Multi-function Control"]:::warmupState
+    end
+
