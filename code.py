@@ -24,29 +24,31 @@ Written for controlling a Dwyer-Omega SCR39-48-080-S9
 
 import time
 import P1AM
-from P1AM.constants import *
+#from P1AM.constants import *
 
 # System state constants (instead of enum)
 class SystemState:
     IDLE = 0
     SELF_CHECK = 1
-    WARM_UP = 2
-    WARM_UP_COMPLETE = 3
-    FULL_TEMP = 4
-    FULL_TEMP_COMPLETE = 5
-    ERROR = 6
-    SHUTDOWN = 7
+    SYSTEM_ARMED = 2
+    WARM_UP = 3
+    WARM_UP_COMPLETE = 4
+    FULL_TEMP = 5
+    FULL_TEMP_COMPLETE = 6
+    ERROR = 7
+    SHUTDOWN = 8
     
     # Dictionary to convert state values to names for display
     NAMES = {
         0: "IDLE",
         1: "SELF_CHECK",
-        2: "WARM_UP",
-        3: "WARM_UP_COMPLETE",
-        4: "FULL_TEMP",
-        5: "FULL_TEMP_COMPLETE",
-        6: "ERROR",
-        7: "SHUTDOWN"
+        2: "SYSTEM_ARMED",
+        3: "WARM_UP",
+        4: "WARM_UP_COMPLETE",
+        5: "FULL_TEMP",
+        6: "FULL_TEMP_COMPLETE",
+        7: "ERROR",
+        8: "SHUTDOWN"
     }
 
 # Button states constants
@@ -54,6 +56,16 @@ class ButtonState:
     NOT_PRESSED = 0
     PRESSED = 1
     RELEASED = 2
+
+# Event types
+class EventType:
+    BUTTON_PRESSED = "BUTTON_PRESSED"
+    TEMPERATURE_REACHED = "TEMPERATURE_REACHED"
+    SELF_CHECK_COMPLETE = "SELF_CHECK_COMPLETE"
+    ERROR_OCCURRED = "ERROR_OCCURRED"
+    ESTOP_ACTIVATED = "ESTOP_ACTIVATED"
+    ESTOP_CLEARED = "ESTOP_CLEARED"
+    TIMEOUT = "TIMEOUT"
 
 # PID Controller class
 class PIDController:
@@ -154,6 +166,508 @@ class Button:
         
         return self.current_state
 
+# Event class for event-driven state machine
+class Event:
+    def __init__(self, event_type, data=None):
+        self.type = event_type
+        self.data = data
+        self.timestamp = time.monotonic()
+
+# LED Manager class for handling indicator patterns
+class LEDManager:
+    def __init__(self, green, amber, blue, red):
+        self.green = green
+        self.amber = amber
+        self.blue = blue
+        self.red = red
+        self.pattern_timer = time.monotonic()
+        self.pattern_state = False
+        
+        # Define LED patterns
+        self.patterns = {
+            "OFF": self._pattern_off,
+            "ON": self._pattern_on,
+            "SLOW_BLINK": self._pattern_slow_blink,
+            "FAST_BLINK": self._pattern_fast_blink,
+            "ERROR_BLINK": self._pattern_error_blink
+        }
+        
+        # Current active patterns for each LED
+        self.active_patterns = {
+            "green": "OFF",
+            "amber": "OFF",
+            "blue": "OFF",
+            "red": "OFF"
+        }
+        
+        # Initialize all LEDs to off
+        self.reset_all()
+    
+    def reset_all(self):
+        """Turn off all LEDs"""
+        self.green.value = False
+        self.amber.value = False
+        self.blue.value = False
+        self.red.value = False
+    
+    def set_pattern(self, led_name, pattern_name):
+        """Set a specific pattern for a specific LED"""
+        if led_name in ["green", "amber", "blue", "red"] and pattern_name in self.patterns:
+            self.active_patterns[led_name] = pattern_name
+    
+    def set_state_indication(self, system_state):
+        """Configure LED patterns based on current system state"""
+        # Reset all patterns first
+        for led in ["green", "amber", "blue", "red"]:
+            self.active_patterns[led] = "OFF"
+            
+        # Set patterns based on state
+        if system_state == SystemState.IDLE:
+            self.active_patterns["green"] = "SLOW_BLINK"
+            
+        elif system_state == SystemState.SELF_CHECK:
+            self.active_patterns["green"] = "FAST_BLINK"
+            
+        elif system_state == SystemState.SYSTEM_ARMED:
+            self.active_patterns["green"] = "FAST_BLINK"
+            
+        elif system_state == SystemState.WARM_UP:
+            self.active_patterns["green"] = "ON"
+            self.active_patterns["amber"] = "SLOW_BLINK"
+            
+        elif system_state == SystemState.WARM_UP_COMPLETE:
+            self.active_patterns["green"] = "ON"
+            self.active_patterns["amber"] = "ON"
+            
+        elif system_state == SystemState.FULL_TEMP:
+            self.active_patterns["green"] = "ON"
+            self.active_patterns["blue"] = "SLOW_BLINK"
+            
+        elif system_state == SystemState.FULL_TEMP_COMPLETE:
+            self.active_patterns["green"] = "ON"
+            self.active_patterns["blue"] = "ON"
+            
+        elif system_state == SystemState.ERROR:
+            self.active_patterns["red"] = "ERROR_BLINK"
+            
+        elif system_state == SystemState.SHUTDOWN:
+            # Keep current patterns but make them blink
+            for led in ["green", "amber", "blue"]:
+                if self.active_patterns[led] == "ON":
+                    self.active_patterns[led] = "FAST_BLINK"
+    
+    def update(self):
+        """Update all LED states based on their current patterns"""
+        current_time = time.monotonic()
+        
+        # Update each LED according to its pattern
+        if self.active_patterns["green"] != "OFF":
+            self.patterns[self.active_patterns["green"]](self.green, current_time)
+            
+        if self.active_patterns["amber"] != "OFF":
+            self.patterns[self.active_patterns["amber"]](self.amber, current_time)
+            
+        if self.active_patterns["blue"] != "OFF":
+            self.patterns[self.active_patterns["blue"]](self.blue, current_time)
+            
+        if self.active_patterns["red"] != "OFF":
+            self.patterns[self.active_patterns["red"]](self.red, current_time)
+    
+    # Pattern implementation methods
+    def _pattern_off(self, led, current_time):
+        led.value = False
+        
+    def _pattern_on(self, led, current_time):
+        led.value = True
+        
+    def _pattern_slow_blink(self, led, current_time):
+        if current_time - self.pattern_timer > BLINK_INTERVAL_SLOW:
+            self.pattern_timer = current_time
+            self.pattern_state = not self.pattern_state
+            led.value = self.pattern_state
+            
+    def _pattern_fast_blink(self, led, current_time):
+        if current_time - self.pattern_timer > BLINK_INTERVAL_FAST:
+            self.pattern_timer = current_time
+            self.pattern_state = not self.pattern_state
+            led.value = self.pattern_state
+            
+    def _pattern_error_blink(self, led, current_time):
+        if current_time - self.pattern_timer > ERROR_BLINK_INTERVAL:
+            self.pattern_timer = current_time
+            self.pattern_state = not self.pattern_state
+            led.value = self.pattern_state
+
+    def perform_sequential_test(self):
+        """Run a sequential LED test pattern"""
+        self.reset_all()
+        
+        # Flash each light 3 times sequentially
+        for _ in range(3):
+            # Green
+            self.green.value = True
+            time.sleep(0.2)
+            self.green.value = False
+            time.sleep(0.1)
+            
+            # Amber
+            self.amber.value = True
+            time.sleep(0.2)
+            self.amber.value = False
+            time.sleep(0.1)
+            
+            # Blue
+            self.blue.value = True
+            time.sleep(0.2)
+            self.blue.value = False
+            time.sleep(0.1)
+            
+            # Red
+            self.red.value = True
+            time.sleep(0.2)
+            self.red.value = False
+            time.sleep(0.1)
+
+# Safety Manager to centralize safety checks
+class SafetyManager:
+    def __init__(self, estop_input):
+        self.estop_input = estop_input
+        self.previous_estop_state = False
+        self.current_temp = None
+        self.current_current = None
+        self.error_code = 0
+        self.error_message = ""
+    
+    def check_estop(self):
+        """
+        Checks if E-STOP is activated
+        E-STOP is a normally open switch - when pressed, it pulls the signal LOW
+        Returns True if E-STOP is pressed (emergency condition)
+        """
+        return self.estop_input.value
+    
+    def update(self):
+        """
+        Perform all safety checks and return safety status
+        Returns: (is_safe, event) tuple - event will be None if no safety event occurred
+        """
+        # Check E-STOP first - highest priority
+        estop_state = self.check_estop()
+        
+        # Detect E-STOP state changes
+        if estop_state and not self.previous_estop_state:
+            # E-STOP was just activated
+            self.error_code = 100
+            self.error_message = "EMERGENCY STOP ACTIVATED"
+            self.previous_estop_state = estop_state
+            return False, Event(EventType.ESTOP_ACTIVATED)
+            
+        elif not estop_state and self.previous_estop_state:
+            # E-STOP was just cleared
+            self.previous_estop_state = estop_state
+            return True, Event(EventType.ESTOP_CLEARED)
+        
+        self.previous_estop_state = estop_state
+        
+        # If E-STOP is active, report unsafe
+        if estop_state:
+            return False, None
+            
+        # Add additional safety checks here if needed
+        
+        # All checks passed
+        return True, None
+    
+    def set_error(self, code, message):
+        """Set an error condition"""
+        self.error_code = code
+        self.error_message = message
+        return Event(EventType.ERROR_OCCURRED, {"code": code, "message": message})
+
+# State Machine class
+class StateMachine:
+    def __init__(self, safety_manager, led_manager, pid_controller, scr_output):
+        self.current_state = SystemState.IDLE
+        self.state_history = []  # Stack of previous states
+        self.state_entry_time = time.monotonic()
+        self.safety_manager = safety_manager
+        self.led_manager = led_manager
+        self.pid_controller = pid_controller
+        self.scr_output = scr_output
+        
+        # Register state handlers
+        self.state_handlers = {
+            SystemState.IDLE: self._handle_idle,
+            SystemState.SELF_CHECK: self._handle_self_check,
+            SystemState.SYSTEM_ARMED: self._handle_system_armed,
+            SystemState.WARM_UP: self._handle_warm_up,
+            SystemState.WARM_UP_COMPLETE: self._handle_warm_up_complete,
+            SystemState.FULL_TEMP: self._handle_full_temp,
+            SystemState.FULL_TEMP_COMPLETE: self._handle_full_temp_complete,
+            SystemState.ERROR: self._handle_error,
+            SystemState.SHUTDOWN: self._handle_shutdown
+        }
+    
+    def transition_to(self, new_state, record_history=True):
+        """Transition to a new state with proper entry and exit actions"""
+        if new_state == self.current_state:
+            return
+            
+        # Store state history
+        if record_history:
+            self.state_history.append(self.current_state)
+            if len(self.state_history) > 10:  # Limit history size
+                self.state_history.pop(0)
+                
+        # Exit actions for current state
+        self._exit_state(self.current_state)
+        
+        # Change state
+        previous_state = self.current_state
+        self.current_state = new_state
+        self.state_entry_time = time.monotonic()
+        
+        # Entry actions for new state
+        self._enter_state(new_state, previous_state)
+    
+    def _enter_state(self, state, previous_state):
+        """Perform entry actions for the given state"""
+        print(f"Entering {SystemState.NAMES[state]} state")
+        
+        # Configure LED patterns for the new state
+        self.led_manager.set_state_indication(state)
+        
+        # State-specific entry actions
+        if state == SystemState.IDLE:
+            # Set SCR to minimum value
+            self.scr_output.real = 4.0
+            
+        elif state == SystemState.SELF_CHECK:
+            # Reset PID controller
+            self.pid_controller.update_setpoint(WARM_UP_SETPOINT)
+            self.pid_controller.integral = 0
+            # Set SCR to minimum value
+            self.scr_output.real = 4.0
+             
+        elif state == SystemState.SYSTEM_ARMED:
+            # Set SCR to minimum value
+            self.scr_output.real = 4.0
+                       
+        elif state == SystemState.WARM_UP:
+            print(f"Setting warm-up setpoint: {WARM_UP_SETPOINT}°F")
+            self.pid_controller.update_setpoint(WARM_UP_SETPOINT)
+            
+        elif state == SystemState.WARM_UP_COMPLETE:
+            print("Warm-up temperature reached")
+            
+        elif state == SystemState.FULL_TEMP:
+            print(f"Setting full temperature setpoint: {FULL_TEMP_SETPOINT}°F")
+            self.pid_controller.update_setpoint(FULL_TEMP_SETPOINT)
+            
+        elif state == SystemState.FULL_TEMP_COMPLETE:
+            print("Full temperature reached")
+            
+        elif state == SystemState.ERROR:
+            # Set SCR to minimum value for safety
+            self.scr_output.real = 4.0
+            print(f"ERROR {self.safety_manager.error_code}: {self.safety_manager.error_message}")
+            
+        elif state == SystemState.SHUTDOWN:
+            # Begin graceful shutdown - LED patterns already set
+            pass
+    
+    def _exit_state(self, state):
+        """Perform exit actions for the given state"""
+        # State-specific exit actions
+        pass
+    
+    def return_to_previous(self):
+        """Return to the previous state"""
+        if self.state_history:
+            previous = self.state_history.pop()
+            self.transition_to(previous, record_history=False)
+    
+    def process_event(self, event):
+        """Process an event based on the current state"""
+        # Handle global events that apply in any state
+        if event.type == EventType.ESTOP_ACTIVATED:
+            self.transition_to(SystemState.ERROR)
+            return
+            
+        # Let the current state handler process the event
+        if self.current_state in self.state_handlers:
+            self.state_handlers[self.current_state](event)
+    
+    def update(self):
+        """Update the state machine"""
+        # Check safety first
+        is_safe, safety_event = self.safety_manager.update()
+        
+        # Process any safety events
+        if safety_event:
+            self.process_event(safety_event)
+            
+        # Only run state-specific logic if safe
+        if is_safe:
+            # Check for state timeouts
+            self._check_timeouts()
+            
+            # Run the current state handler with no event
+            if self.current_state in self.state_handlers:
+                self.state_handlers[self.current_state](None)
+    
+    def _check_timeouts(self):
+        """Check for state timeouts"""
+        elapsed_time = time.monotonic() - self.state_entry_time
+        
+        # State-specific timeout handling
+        if self.current_state == SystemState.SELF_CHECK and elapsed_time >= 3.0:
+            self.process_event(Event(EventType.TIMEOUT, {"state": SystemState.SELF_CHECK}))
+    
+    # Individual state handlers
+    def _handle_idle(self, event):
+        """Handle IDLE state events"""
+        if event is None:
+            # No event, just regular update
+            return
+            
+        if event.type == EventType.BUTTON_PRESSED:
+            if event.data == "INITIALIZE":
+                self.transition_to(SystemState.SYSTEM_ARMED)
+    
+    def _handle_self_check(self, event):
+        """Handle SELF_CHECK state events"""
+        elapsed_time = time.monotonic() - self.state_entry_time
+        
+        if event is None:
+            # First time entry actions
+            if elapsed_time < 0.1:
+                print("Running self-check diagnostic...")
+                # Run self check in a non-blocking way
+                if run_self_check(self.safety_manager):
+                    # Schedule a timeout to transition to IDLE
+                    pass
+            return
+            
+        if event.type == EventType.TIMEOUT:
+            # Self-check timeout, transition to IDLE
+            self.transition_to(SystemState.IDLE)
+    
+    def _handle_system_armed(self, event):
+        """Handle SYSTEM_ARMED state events"""
+        if event is None:
+            # No event, just regular update
+            return
+            
+        if event.type == EventType.BUTTON_PRESSED:
+            if event.data == "START":
+                self.transition_to(SystemState.WARM_UP)
+    
+    def _handle_heating_state(self, temp):
+        """Common handler for all heating states"""
+        if temp is None:
+            return
+            
+        # Calculate and apply PID output
+        output = self.pid_controller.compute(temp)
+        if output is not None:
+            self.scr_output.real = output
+    
+    def _handle_warm_up(self, event):
+        """Handle WARM_UP state events"""
+        # First handle common heating behavior
+        temp = read_temperature(self.safety_manager)
+        self._handle_heating_state(temp)
+        
+        if event is None:
+            # Check if setpoint reached
+            if temp is not None and temp >= WARM_UP_SETPOINT:
+                self.transition_to(SystemState.WARM_UP_COMPLETE)
+            return
+            
+        if event.type == EventType.BUTTON_PRESSED:
+            if event.data == "START":
+                self.transition_to(SystemState.SHUTDOWN)
+                
+        elif event.type == EventType.TEMPERATURE_REACHED:
+            if event.data == "WARM_UP":
+                self.transition_to(SystemState.WARM_UP_COMPLETE)
+    
+    def _handle_warm_up_complete(self, event):
+        """Handle WARM_UP_COMPLETE state events"""
+        # Continue with heating behavior
+        temp = read_temperature(self.safety_manager)
+        self._handle_heating_state(temp)
+        
+        if event is None:
+            return
+            
+        if event.type == EventType.BUTTON_PRESSED:
+            if event.data == "START":
+                self.transition_to(SystemState.FULL_TEMP)
+    
+    def _handle_full_temp(self, event):
+        """Handle FULL_TEMP state events"""
+        # First handle common heating behavior
+        temp = read_temperature(self.safety_manager)
+        self._handle_heating_state(temp)
+        
+        if event is None:
+            # Check if setpoint reached
+            if temp is not None and temp >= FULL_TEMP_SETPOINT:
+                self.transition_to(SystemState.FULL_TEMP_COMPLETE)
+            return
+            
+        if event.type == EventType.BUTTON_PRESSED:
+            if event.data == "START":
+                self.transition_to(SystemState.WARM_UP)
+                
+        elif event.type == EventType.TEMPERATURE_REACHED:
+            if event.data == "FULL_TEMP":
+                self.transition_to(SystemState.FULL_TEMP_COMPLETE)
+    
+    def _handle_full_temp_complete(self, event):
+        """Handle FULL_TEMP_COMPLETE state events"""
+        # Continue with heating behavior
+        temp = read_temperature(self.safety_manager)
+        self._handle_heating_state(temp)
+        
+        if event is None:
+            return
+            
+        if event.type == EventType.BUTTON_PRESSED:
+            if event.data == "START":
+                self.transition_to(SystemState.SHUTDOWN)
+    
+    def _handle_error(self, event):
+        """Handle ERROR state events"""
+        if event is None:
+            return
+            
+        if event.type == EventType.BUTTON_PRESSED:
+            if event.data == "INITIALIZE" and self.safety_manager.error_code != 100:
+                # Reset error state if not E-STOP error
+                self.safety_manager.error_code = 0
+                self.safety_manager.error_message = ""
+                self.transition_to(SystemState.IDLE)
+                
+        elif event.type == EventType.ESTOP_CLEARED:
+            if self.safety_manager.error_code == 100:
+                # Clear E-STOP error after E-STOP is physically reset
+                self.safety_manager.error_code = 0
+                self.safety_manager.error_message = ""
+    
+    def _handle_shutdown(self, event):
+        """Handle SHUTDOWN state events"""
+        if event is None:
+            # Gradually reduce output
+            if self.scr_output.real > 4.1:
+                self.scr_output.real -= 0.1
+            else:
+                # Shutdown complete
+                self.transition_to(SystemState.IDLE)
+            return
+
 # Configuration constants
 # Temperature setpoints
 WARM_UP_SETPOINT = 100.0  # Initial warm-up temperature in degrees F
@@ -180,6 +694,82 @@ BLINK_INTERVAL_SLOW = 1.0  # Slow blink interval in seconds
 BLINK_INTERVAL_FAST = 0.3  # Fast blink interval in seconds
 ERROR_BLINK_COUNT = 5      # Number of blinks in error pattern
 ERROR_BLINK_INTERVAL = 0.5 # Time between error blinks
+
+# Function to read temperature safely
+def read_temperature(safety_manager):
+    try:
+        # Read primary temperature (Slot 1, Channel 1)
+        temp = thm_module[1].value
+        if temp is None or temp < 0 or temp > 2000:  # Sanity check
+            raise ValueError("Invalid temperature reading")
+        return temp
+    except Exception as e:
+        safety_manager.set_error(1, f"Temperature reading error: {e}")
+        return None
+
+# Function to read current safely
+def read_current(safety_manager):
+    try:
+        # Read current transformer values
+        ct1 = current_module[1].value  # Phase 1 current
+        ct2 = current_module[2].value  # Phase 2 current
+        ct3 = current_module[3].value  # Phase 3 current
+        
+        # Convert raw values to amperes (scaling depends on CT setup)
+        # This scaling would need to be calibrated for the specific CTs used
+        current_a = ct1 * 0.333 # Example scaling for 200A/0.333V CT
+        current_b = ct2 * 0.333
+        current_c = ct3 * 0.333
+        
+        # Check for overcurrent condition
+        if (current_a > CURRENT_THRESHOLD or 
+            current_b > CURRENT_THRESHOLD or 
+            current_c > CURRENT_THRESHOLD):
+            safety_manager.set_error(2, f"Overcurrent detected: A={current_a:.1f}, B={current_b:.1f}, C={current_c:.1f}")
+            return None
+            
+        # Return average current for monitoring
+        return (current_a + current_b + current_c) / 3
+    except Exception as e:
+        safety_manager.set_error(3, f"Current reading error: {e}")
+        return None
+
+# Self-check routine
+def run_self_check(safety_manager):
+    print("Running self-check diagnostic...")
+    
+    # Test all lights in sequence - this should be in LED manager now
+    led_manager.perform_sequential_test()
+    
+    # Check modules
+    if len(base.io_modules) < 6:
+        safety_manager.set_error(10, "Missing required modules")
+        return False
+    
+    # Check thermocouple readings
+    temp = read_temperature(safety_manager)
+    if temp is None:
+        safety_manager.set_error(11, "Failed to read temperature during self-check")
+        return False
+    print(f"Initial temperature reading: {temp:.1f}°F")
+    
+    # Check current transformer readings
+    current = read_current(safety_manager)
+    if current is None:
+        safety_manager.set_error(12, "Failed to read current during self-check")
+        return False
+    print(f"Initial current reading: {current:.2f}A")
+    
+    # Test SCR output (brief test at minimum)
+    try:
+        scr_output.real = 4.0
+        time.sleep(0.5)
+    except Exception as e:
+        safety_manager.set_error(13, f"SCR output test failed: {e}")
+        return False
+    
+    print("Self-check complete: System IDLE")
+    return True
 
 # Initialize P1AM Base and modules
 base = P1AM.Base()
@@ -236,433 +826,44 @@ pid = PIDController(
     output_max=20   # 20mA maximum output
 )
 
-# Variables for system state control
-current_state = SystemState.IDLE
-previous_state = None
-state_entry_time = time.monotonic()
+# Initialize managers
+safety_manager = SafetyManager(estop_button_input)
+led_manager = LEDManager(green_light, amber_light, blue_light, red_light)
+state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
+
+# Status reporting variables
 last_print_time = 0
 print_interval = 1.0  # Status print interval in seconds
-led_pattern_timer = time.monotonic()
-led_pattern_state = False  # Toggle state for blinking
 
-# Error handling variables
-error_code = 0
-error_message = ""
-
-# Set all lights off initially
-green_light.value = False
-amber_light.value = False
-blue_light.value = False
-red_light.value = False
-
-# Function to check E-STOP status
-def check_estop():
-    """
-    Checks if E-STOP is activated
-    E-STOP is a normally open switch - when pressed, it pulls the signal LOW
-    Returns True if E-STOP is pressed (emergency condition)
-    """
-    return not estop_button_input.value  # NOT because LOW = pressed for NO switch
-
-# Function to read temperature safely
-def read_temperature():
-    # First check E-STOP
-    if check_estop():
-        set_error(100, "EMERGENCY STOP ACTIVATED")
-        return None
-        
-    try:
-        # Read primary temperature (Slot 1, Channel 1)
-        temp = thm_module[1].value
-        if temp is None or temp < 0 or temp > 2000:  # Sanity check
-            raise ValueError("Invalid temperature reading")
-        return temp
-    except Exception as e:
-        set_error(1, f"Temperature reading error: {e}")
-        return None
-
-# Function to read current safely
-def read_current():
-    # First check E-STOP
-    if check_estop():
-        set_error(100, "EMERGENCY STOP ACTIVATED")
-        return None
-        
-    try:
-        # Read current transformer values
-        ct1 = current_module[1].value  # Phase 1 current
-        ct2 = current_module[2].value  # Phase 2 current
-        ct3 = current_module[3].value  # Phase 3 current
-        
-        # Convert raw values to amperes (scaling depends on CT setup)
-        # This scaling would need to be calibrated for the specific CTs used
-        current_a = ct1 * 0.333 # Example scaling for 200A/0.333V CT
-        current_b = ct2 * 0.333
-        current_c = ct3 * 0.333
-        
-        # Check for overcurrent condition
-        if (current_a > CURRENT_THRESHOLD or 
-            current_b > CURRENT_THRESHOLD or 
-            current_c > CURRENT_THRESHOLD):
-            set_error(2, f"Overcurrent detected: A={current_a:.1f}, B={current_b:.1f}, C={current_c:.1f}")
-            return None
-            
-        # Return average current for monitoring
-        return (current_a + current_b + current_c) / 3
-    except Exception as e:
-        set_error(3, f"Current reading error: {e}")
-        return None
-
-# Error handling function
-def set_error(code, message):
-    global error_code, error_message, current_state
-    error_code = code
-    error_message = message
-    if current_state != SystemState.ERROR:
-        print(f"ERROR {code}: {message}")
-        # Transition to error state
-        transition_to_state(SystemState.ERROR)
-
-# State transition function
-def transition_to_state(new_state):
-    global current_state, previous_state, state_entry_time
-    if new_state != current_state:
-        previous_state = current_state
-        current_state = new_state
-        state_entry_time = time.monotonic()
-        
-        # State entry actions
-        if new_state == SystemState.IDLE:
-            print("Entering IDLE state")
-            # Set SCR to minimum value
-            scr_output.real = 4.0
-            # Turn off all status lights except slow flashing green
-            amber_light.value = False
-            blue_light.value = False
-            red_light.value = False
-            
-        elif new_state == SystemState.SELF_CHECK:
-            print("Entering SELF_CHECK state")
-            # Reset PID controller
-            pid.update_setpoint(WARM_UP_SETPOINT)
-            pid.integral = 0
-            # Turn off all lights during self-check initialization
-            green_light.value = False
-            amber_light.value = False
-            blue_light.value = False
-            red_light.value = False
-            # Set SCR to minimum value
-            scr_output.real = 4.0
-            
-        elif new_state == SystemState.WARM_UP:
-            print(f"Entering WARM_UP state, setpoint: {WARM_UP_SETPOINT}°F")
-            pid.update_setpoint(WARM_UP_SETPOINT)
-            # Set status lights
-            green_light.value = True
-            amber_light.value = False
-            blue_light.value = False
-            red_light.value = False
-            
-        elif new_state == SystemState.WARM_UP_COMPLETE:
-            print("Warm-up temperature reached")
-            # Set status lights
-            green_light.value = True
-            amber_light.value = True  # Solid amber indicates warm-up complete
-            blue_light.value = False
-            red_light.value = False
-            
-        elif new_state == SystemState.FULL_TEMP:
-            print(f"Entering FULL_TEMP state, setpoint: {FULL_TEMP_SETPOINT}°F")
-            pid.update_setpoint(FULL_TEMP_SETPOINT)
-            # Set status lights
-            green_light.value = True
-            amber_light.value = False
-            blue_light.value = False
-            red_light.value = False
-            
-        elif new_state == SystemState.FULL_TEMP_COMPLETE:
-            print("Full temperature reached")
-            # Set status lights
-            green_light.value = True
-            amber_light.value = False
-            blue_light.value = True  # Solid blue indicates full temp reached
-            red_light.value = False
-            
-        elif new_state == SystemState.ERROR:
-            print(f"Entering ERROR state: {error_message}")
-            # Set SCR to minimum value
-            scr_output.real = 4.0
-            # Turn off all status lights except red
-            green_light.value = False
-            amber_light.value = False
-            blue_light.value = False
-            # Red light will flash in the error state handler
-            
-        elif new_state == SystemState.SHUTDOWN:
-            print("Entering SHUTDOWN state")
-            # Begin graceful shutdown
-            # Keep status lights according to previous state
-            # SCR output will be gradually reduced in the shutdown state handler
-
-# Handle the sequential light pattern for self-check
-def perform_sequential_light_test():
-    # Flash each light 3 times sequentially
-    for _ in range(3):
-        # Green
-        green_light.value = True
-        time.sleep(0.2)
-        green_light.value = False
-        time.sleep(0.1)
-        
-        # Amber
-        amber_light.value = True
-        time.sleep(0.2)
-        amber_light.value = False
-        time.sleep(0.1)
-        
-        # Blue
-        blue_light.value = True
-        time.sleep(0.2)
-        blue_light.value = False
-        time.sleep(0.1)
-        
-        # Red
-        red_light.value = True
-        time.sleep(0.2)
-        red_light.value = False
-        time.sleep(0.1)
-
-# Self-check routine
-def run_self_check():
-    print("Running self-check diagnostic...")
-    # Test all lights in sequence
-    perform_sequential_light_test()
-    
-    # Check modules
-    if len(base.io_modules) < 6:
-        set_error(10, "Missing required modules")
-        return False
-    
-    # Check thermocouple readings
-    temp = read_temperature()
-    if temp is None:
-        set_error(11, "Failed to read temperature during self-check")
-        return False
-    print(f"Initial temperature reading: {temp:.1f}°F")
-    
-    # Check current transformer readings
-    current = read_current()
-    if current is None:
-        set_error(12, "Failed to read current during self-check")
-        return False
-    print(f"Initial current reading: {current:.2f}A")
-    
-    # Test SCR output (brief test at minimum)
-    try:
-        scr_output.real = 4.0
-        time.sleep(0.5)
-    except Exception as e:
-        set_error(13, f"SCR output test failed: {e}")
-        return False
-    
-    print("Self-check complete: System armed")
-    return True
-
-# Update LED patterns based on current state
-def update_leds():
-    global led_pattern_timer, led_pattern_state
-    current_time = time.monotonic()
-    
-    # Update LED patterns based on current state
-    if current_state == SystemState.IDLE:
-        # Slow flashing green in IDLE
-        if current_time - led_pattern_timer > BLINK_INTERVAL_SLOW:
-            led_pattern_timer = current_time
-            led_pattern_state = not led_pattern_state
-            green_light.value = led_pattern_state
-    
-    elif current_state == SystemState.SELF_CHECK:
-        # Fast flashing green during self-check
-        if current_time - led_pattern_timer > BLINK_INTERVAL_FAST:
-            led_pattern_timer = current_time
-            led_pattern_state = not led_pattern_state
-            green_light.value = led_pattern_state
-    
-    elif current_state == SystemState.WARM_UP:
-        # Green steady, amber flashing during warm-up
-        if current_time - led_pattern_timer > BLINK_INTERVAL_SLOW:
-            led_pattern_timer = current_time
-            led_pattern_state = not led_pattern_state
-            amber_light.value = led_pattern_state
-    
-    elif current_state == SystemState.FULL_TEMP:
-        # Green steady, blue flashing during full-temp ramp
-        if current_time - led_pattern_timer > BLINK_INTERVAL_SLOW:
-            led_pattern_timer = current_time
-            led_pattern_state = not led_pattern_state
-            blue_light.value = led_pattern_state
-    
-    elif current_state == SystemState.ERROR:
-        # Flash red in ERROR state
-        if current_time - led_pattern_timer > ERROR_BLINK_INTERVAL:
-            led_pattern_timer = current_time
-            led_pattern_state = not led_pattern_state
-            red_light.value = led_pattern_state
-    
-    elif current_state == SystemState.SHUTDOWN:
-        # During shutdown, flash all active lights
-        if current_time - led_pattern_timer > BLINK_INTERVAL_FAST:
-            led_pattern_timer = current_time
-            led_pattern_state = not led_pattern_state
-            if green_light.value:
-                green_light.value = led_pattern_state
-            if amber_light.value:
-                amber_light.value = led_pattern_state
-            if blue_light.value:
-                blue_light.value = led_pattern_state
-
-# Handle state-specific logic and transitions
-def handle_current_state():
-    global current_state
-    
-    # First and foremost, check E-STOP directly using the check_estop function
-    # This ensures we detect E-STOP activation immediately, regardless of button logic
-    if check_estop():
-        # EMERGENCY STOP takes precedence over everything
-        if current_state != SystemState.ERROR or error_code != 100:
-            set_error(100, "EMERGENCY STOP ACTIVATED")
-        # E-STOP is activated - don't process any other inputs
-        # Just update the LED indicators and return
-        update_leds()
-        return
-    
-    # Read other inputs
-    initialize_button_state = initialize_button.update()
-    start_button_state = start_button.update()
-    
-    # Regular state-specific logic, only processed if E-STOP is not activated
-    if current_state == SystemState.IDLE:
-        # In IDLE, only respond to INITIALIZE button
-        if initialize_button_state == ButtonState.PRESSED:
-            transition_to_state(SystemState.SELF_CHECK)
-    
-    elif current_state == SystemState.SELF_CHECK:
-        # Run self-check routine on first entry to state
-        elapsed_in_state = time.monotonic() - state_entry_time
-        if elapsed_in_state < 0.1:  # Just entered state
-            if run_self_check():
-                # Self-check passed, transition to armed state (still in SELF_CHECK)
-                # Will transition out on next iteration
-                pass
-            else:
-                # Self-check failed, error state is already set by run_self_check
-                pass
-        elif elapsed_in_state >= 3.0:  # Give time for self-check to complete
-            # Transition to IDLE after successful self-check
-            transition_to_state(SystemState.IDLE)
-    
-    elif current_state == SystemState.WARM_UP:
-        # Check if we've reached warm-up temperature
-        temp = read_temperature()
-        if temp is not None and temp >= WARM_UP_SETPOINT:
-            transition_to_state(SystemState.WARM_UP_COMPLETE)
-        
-        # Check for START button to initiate shutdown
-        if start_button_state == ButtonState.PRESSED:
-            transition_to_state(SystemState.SHUTDOWN)
-    
-    elif current_state == SystemState.WARM_UP_COMPLETE:
-        # In warm-up complete, START button begins full-temp ramp
-        if start_button_state == ButtonState.PRESSED:
-            transition_to_state(SystemState.FULL_TEMP)
-    
-    elif current_state == SystemState.FULL_TEMP:
-        # Check if we've reached full temperature
-        temp = read_temperature()
-        if temp is not None and temp >= FULL_TEMP_SETPOINT:
-            transition_to_state(SystemState.FULL_TEMP_COMPLETE)
-        
-        # Check for START button to return to warm-up
-        if start_button_state == ButtonState.PRESSED:
-            transition_to_state(SystemState.WARM_UP)
-    
-    elif current_state == SystemState.FULL_TEMP_COMPLETE:
-        # In full-temp complete, START button initiates shutdown
-        if start_button_state == ButtonState.PRESSED:
-            transition_to_state(SystemState.SHUTDOWN)
-    
-    elif current_state == SystemState.ERROR:
-        # In ERROR state, can only transition back to IDLE after acknowledgment and NO E-STOP
-        if error_code != 100 and initialize_button_state == ButtonState.PRESSED:
-            # Reset error state (if not E-STOP)
-            error_code = 0
-            error_message = ""
-            transition_to_state(SystemState.IDLE)
-        # Note: If error_code is 100 (E-STOP), we can only clear it when E-STOP is not activated
-    
-    elif current_state == SystemState.SHUTDOWN:
-        # Gradually reduce output to prevent thermal shock
-        if scr_output.real > 4.1:  # If above minimum
-            scr_output.real -= 0.1  # Gradually reduce
-        else:
-            # Shutdown complete
-            transition_to_state(SystemState.IDLE)
-    
-    # Update LEDs based on current state
-    update_leds()
-
-print(f"System initialized.")
+print("System initialized.")
 print("Beginning control loop...")
 print("Press INITIALIZE button (green) to begin")
 
 # Main control loop
 while True:
     try:
-        # Check E-STOP status first - this has highest priority
-        estop_active = check_estop()
+        # Update button states and generate events
+        initialize_state = initialize_button.update()
+        start_state = start_button.update()
         
-        # If E-STOP is activated and we're not already in ERROR state with E-STOP code,
-        # immediately transition to ERROR state
-        if estop_active and (current_state != SystemState.ERROR or error_code != 100):
-            set_error(100, "EMERGENCY STOP ACTIVATED")
-            # Set SCR to minimum immediately
-            scr_output.real = 4.0
-            
-        # Handle state machine
-        handle_current_state()
+        # Create button events when needed
+        if initialize_state == ButtonState.PRESSED:
+            state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))
         
-        # Only proceed with normal operations if E-STOP is not active
-        if not estop_active:
-            # Read current temperature 
-            current_temp = read_temperature()
-            
-            # Read current
-            current_reading = read_current()
-            
-            # Only run PID control in active heating states and if no errors
-            if (current_state == SystemState.WARM_UP or 
-                current_state == SystemState.WARM_UP_COMPLETE or
-                current_state == SystemState.FULL_TEMP or
-                current_state == SystemState.FULL_TEMP_COMPLETE) and error_code == 0:
-                
-                if current_temp is not None:
-                    # Calculate PID output
-                    output = pid.compute(current_temp)
-                    
-                    # Apply control output if calculated
-                    if output is not None:
-                        # Set SCR control signal (4-20mA)
-                        scr_output.real = output
-                        
-                        # Update heating indicator state for status reporting
-                        is_heating = scr_output.real > HEATING_THRESHOLD
-        else:
-            # E-STOP is active, ensure SCR output is at minimum
-            scr_output.real = 4.0
-            current_temp = None
-            current_reading = None
-            
-        # Print status every second
+        if start_state == ButtonState.PRESSED:
+            state_machine.process_event(Event(EventType.BUTTON_PRESSED, "START"))
+        
+        # Update state machine
+        state_machine.update()
+        
+        # Update LED manager
+        led_manager.update()
+        
+        # Read sensors for status reporting
+        current_temp = read_temperature(safety_manager)
+        current_reading = read_current(safety_manager)
+        
+        # Print status periodically
         current_time = time.monotonic()
         if current_time - last_print_time >= print_interval:
             # Format temperature and current readings
@@ -670,8 +871,8 @@ while True:
             curr_str = f"{current_reading:.2f}A" if current_reading is not None else "ERROR"
             
             # Status strings
-            state_str = SystemState.NAMES[current_state]
-            output_str = f"{scr_output.real:.2f}mA" if current_state not in [SystemState.IDLE, SystemState.ERROR] else "OFF"
+            state_str = SystemState.NAMES[state_machine.current_state]
+            output_str = f"{scr_output.real:.2f}mA" if state_machine.current_state not in [SystemState.IDLE, SystemState.ERROR] else "OFF"
             
             # LED status
             green_status = "ON" if green_light.value else "OFF"
@@ -680,19 +881,20 @@ while True:
             red_status = "ON" if red_light.value else "OFF"
             
             # E-STOP status
-            estop_status = "ACTIVATED" if estop_active else "NORMAL"
+            estop_status = "ACTIVATED" if safety_manager.check_estop() else "NORMAL"
             
             print(f"State: {state_str} | E-STOP: {estop_status} | Temp: {temp_str} | Current: {curr_str} | Output: {output_str}")
             print(f"Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
             
-            if error_code != 0:
-                print(f"ERROR {error_code}: {error_message}")
+            if safety_manager.error_code != 0:
+                print(f"ERROR {safety_manager.error_code}: {safety_manager.error_message}")
             
             last_print_time = current_time
             
     except Exception as e:
-        # Unexpected error - transition to ERROR state
-        set_error(999, f"Unhandled exception: {e}")
+        # Unexpected error
+        safety_manager.set_error(999, f"Unhandled exception: {e}")
+        state_machine.transition_to(SystemState.ERROR)
         # Reset outputs to safe state
         scr_output.real = 4.0  # Minimum control signal
     
