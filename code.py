@@ -50,6 +50,19 @@ class SystemState:
         7: "ERROR",
         8: "SHUTDOWN"
     }
+    
+    # Define valid state transitions
+    VALID_TRANSITIONS = {
+        IDLE: [SELF_CHECK, ERROR],
+        SELF_CHECK: [IDLE, SYSTEM_ARMED, ERROR],
+        SYSTEM_ARMED: [WARM_UP, IDLE, ERROR],
+        WARM_UP: [WARM_UP_COMPLETE, SHUTDOWN, ERROR],
+        WARM_UP_COMPLETE: [FULL_TEMP, SHUTDOWN, ERROR],
+        FULL_TEMP: [FULL_TEMP_COMPLETE, WARM_UP, ERROR],
+        FULL_TEMP_COMPLETE: [SHUTDOWN, ERROR],
+        ERROR: [IDLE],
+        SHUTDOWN: [IDLE, ERROR]
+    }
 
 # Button states constants
 class ButtonState:
@@ -131,40 +144,63 @@ class PIDController:
         # Reset integral term to prevent bump in output
         self.integral = 0
 
-# Button handling with debouncing
+# Button handling with robust debouncing
 class Button:
-    def __init__(self, digital_in, debounce_time=0.05, is_normally_closed=True):
+    def __init__(self, digital_in, debounce_time=0.05, consistent_readings=3, is_normally_closed=True):
         self.digital_in = digital_in
         self.debounce_time = debounce_time
+        self.consistent_readings = consistent_readings
+        self.reading_history = [False] * consistent_readings
         self.last_state = False
         self.last_change_time = time.monotonic()
         self.current_state = ButtonState.NOT_PRESSED
+        self.previous_state = ButtonState.NOT_PRESSED
         self.is_normally_closed = is_normally_closed
+        self.event_fired = False  # Track if event was fired for this press
     
     def update(self):
         # Read the current value of the button input
         current_reading = self.digital_in.value
         current_time = time.monotonic()
         
+        # Shift history and add new reading
+        self.reading_history.pop(0)
+        self.reading_history.append(current_reading)
+        
         # Only process if debounce time has elapsed
         if current_time - self.last_change_time > self.debounce_time:
-            # Check if state has changed
-            if current_reading != self.last_state:
-                self.last_change_time = current_time
-                self.last_state = current_reading
-                
-                # For NC buttons - when HIGH, the button is pressed (path to ground broken)
-                # For NO buttons - when LOW, the button is pressed (path to ground made)
-                if (self.is_normally_closed and current_reading) or (not self.is_normally_closed and not current_reading):
-                    self.current_state = ButtonState.PRESSED
-                else:
-                    self.current_state = ButtonState.RELEASED
+            # Convert reading to a button state
+            if (self.is_normally_closed and current_reading) or (not self.is_normally_closed and not current_reading):
+                button_pressed = True
             else:
-                # Reset to not pressed after processing the edge
-                if self.current_state == ButtonState.PRESSED or self.current_state == ButtonState.RELEASED:
-                    self.current_state = ButtonState.NOT_PRESSED
+                button_pressed = False
+                
+            # Check if all readings in history are consistent
+            if all(r == self.reading_history[0] for r in self.reading_history):
+                # State has been stable for multiple readings
+                
+                # Check if state has changed
+                if button_pressed != self.last_state:
+                    self.last_change_time = current_time
+                    self.last_state = button_pressed
+                    
+                    if button_pressed:
+                        self.previous_state = self.current_state
+                        self.current_state = ButtonState.PRESSED
+                        self.event_fired = False  # Reset event fired flag
+                    else:
+                        self.previous_state = self.current_state
+                        self.current_state = ButtonState.RELEASED
         
+        # Return current button state
         return self.current_state
+        
+    def get_event_and_clear(self):
+        """Get an event if a button press hasn't been processed yet"""
+        if self.current_state == ButtonState.PRESSED and not self.event_fired:
+            self.event_fired = True  # Mark that we've fired an event for this press
+            return True
+        return False
 
 # Event class for event-driven state machine
 class Event:
@@ -172,6 +208,9 @@ class Event:
         self.type = event_type
         self.data = data
         self.timestamp = time.monotonic()
+        
+    def __str__(self):
+        return f"Event(type={self.type}, data={self.data})"
 
 # LED Manager class for handling indicator patterns
 class LEDManager:
@@ -180,8 +219,20 @@ class LEDManager:
         self.amber = amber
         self.blue = blue
         self.red = red
-        self.pattern_timer = time.monotonic()
-        self.pattern_state = False
+        
+        # Separate timers and states for each LED
+        self.pattern_timers = {
+            "green": time.monotonic(),
+            "amber": time.monotonic(),
+            "blue": time.monotonic(),
+            "red": time.monotonic()
+        }
+        self.pattern_states = {
+            "green": False,
+            "amber": False,
+            "blue": False,
+            "red": False
+        }
         
         # Define LED patterns
         self.patterns = {
@@ -214,10 +265,11 @@ class LEDManager:
         """Set a specific pattern for a specific LED"""
         if led_name in ["green", "amber", "blue", "red"] and pattern_name in self.patterns:
             self.active_patterns[led_name] = pattern_name
+            print(f"Set {led_name} LED to {pattern_name} pattern")
     
     def set_state_indication(self, system_state):
         """Configure LED patterns based on current system state"""
-        # Reset all patterns first
+        # Reset all patterns first to avoid conflicts
         for led in ["green", "amber", "blue", "red"]:
             self.active_patterns[led] = "OFF"
             
@@ -229,7 +281,7 @@ class LEDManager:
             self.active_patterns["green"] = "FAST_BLINK"
             
         elif system_state == SystemState.SYSTEM_ARMED:
-            self.active_patterns["green"] = "FAST_BLINK"
+            self.active_patterns["green"] = "ON"
             
         elif system_state == SystemState.WARM_UP:
             self.active_patterns["green"] = "ON"
@@ -255,6 +307,8 @@ class LEDManager:
             for led in ["green", "amber", "blue"]:
                 if self.active_patterns[led] == "ON":
                     self.active_patterns[led] = "FAST_BLINK"
+                    
+        print(f"Updated LED patterns for state: {SystemState.NAMES[system_state]}")
     
     def update(self):
         """Update all LED states based on their current patterns"""
@@ -262,41 +316,41 @@ class LEDManager:
         
         # Update each LED according to its pattern
         if self.active_patterns["green"] != "OFF":
-            self.patterns[self.active_patterns["green"]](self.green, current_time)
+            self.patterns[self.active_patterns["green"]](self.green, "green", current_time)
             
         if self.active_patterns["amber"] != "OFF":
-            self.patterns[self.active_patterns["amber"]](self.amber, current_time)
+            self.patterns[self.active_patterns["amber"]](self.amber, "amber", current_time)
             
         if self.active_patterns["blue"] != "OFF":
-            self.patterns[self.active_patterns["blue"]](self.blue, current_time)
+            self.patterns[self.active_patterns["blue"]](self.blue, "blue", current_time)
             
         if self.active_patterns["red"] != "OFF":
-            self.patterns[self.active_patterns["red"]](self.red, current_time)
+            self.patterns[self.active_patterns["red"]](self.red, "red", current_time)
     
     # Pattern implementation methods
-    def _pattern_off(self, led, current_time):
+    def _pattern_off(self, led, led_name, current_time):
         led.value = False
         
-    def _pattern_on(self, led, current_time):
+    def _pattern_on(self, led, led_name, current_time):
         led.value = True
         
-    def _pattern_slow_blink(self, led, current_time):
-        if current_time - self.pattern_timer > BLINK_INTERVAL_SLOW:
-            self.pattern_timer = current_time
-            self.pattern_state = not self.pattern_state
-            led.value = self.pattern_state
+    def _pattern_slow_blink(self, led, led_name, current_time):
+        if current_time - self.pattern_timers[led_name] > BLINK_INTERVAL_SLOW:
+            self.pattern_timers[led_name] = current_time
+            self.pattern_states[led_name] = not self.pattern_states[led_name]
+            led.value = self.pattern_states[led_name]
             
-    def _pattern_fast_blink(self, led, current_time):
-        if current_time - self.pattern_timer > BLINK_INTERVAL_FAST:
-            self.pattern_timer = current_time
-            self.pattern_state = not self.pattern_state
-            led.value = self.pattern_state
+    def _pattern_fast_blink(self, led, led_name, current_time):
+        if current_time - self.pattern_timers[led_name] > BLINK_INTERVAL_FAST:
+            self.pattern_timers[led_name] = current_time
+            self.pattern_states[led_name] = not self.pattern_states[led_name]
+            led.value = self.pattern_states[led_name]
             
-    def _pattern_error_blink(self, led, current_time):
-        if current_time - self.pattern_timer > ERROR_BLINK_INTERVAL:
-            self.pattern_timer = current_time
-            self.pattern_state = not self.pattern_state
-            led.value = self.pattern_state
+    def _pattern_error_blink(self, led, led_name, current_time):
+        if current_time - self.pattern_timers[led_name] > ERROR_BLINK_INTERVAL:
+            self.pattern_timers[led_name] = current_time
+            self.pattern_states[led_name] = not self.pattern_states[led_name]
+            led.value = self.pattern_states[led_name]
 
     def perform_sequential_test(self):
         """Run a sequential LED test pattern"""
@@ -360,11 +414,13 @@ class SafetyManager:
             self.error_code = 100
             self.error_message = "EMERGENCY STOP ACTIVATED"
             self.previous_estop_state = estop_state
+            print("E-STOP ACTIVATED")
             return False, Event(EventType.ESTOP_ACTIVATED)
             
         elif not estop_state and self.previous_estop_state:
             # E-STOP was just cleared
             self.previous_estop_state = estop_state
+            print("E-STOP CLEARED")
             return True, Event(EventType.ESTOP_CLEARED)
         
         self.previous_estop_state = estop_state
@@ -382,6 +438,7 @@ class SafetyManager:
         """Set an error condition"""
         self.error_code = code
         self.error_message = message
+        print(f"ERROR {code}: {message}")
         return Event(EventType.ERROR_OCCURRED, {"code": code, "message": message})
 
 # State Machine class
@@ -408,10 +465,23 @@ class StateMachine:
             SystemState.SHUTDOWN: self._handle_shutdown
         }
     
+    def is_valid_transition(self, from_state, to_state):
+        """Check if a state transition is valid"""
+        if to_state in SystemState.VALID_TRANSITIONS.get(from_state, []):
+            return True
+        return False
+    
     def transition_to(self, new_state, record_history=True):
         """Transition to a new state with proper entry and exit actions"""
         if new_state == self.current_state:
             return
+            
+        # Validate the transition
+        if not self.is_valid_transition(self.current_state, new_state):
+            print(f"ERROR: Invalid state transition from {SystemState.NAMES[self.current_state]} to {SystemState.NAMES[new_state]}")
+            return
+            
+        print(f"Transitioning from {SystemState.NAMES[self.current_state]} to {SystemState.NAMES[new_state]}")
             
         # Store state history
         if record_history:
@@ -479,7 +549,9 @@ class StateMachine:
     def _exit_state(self, state):
         """Perform exit actions for the given state"""
         # State-specific exit actions
-        pass
+        if state == SystemState.SELF_CHECK:
+            # Cleanup any self-check resources
+            pass
     
     def return_to_previous(self):
         """Return to the previous state"""
@@ -489,14 +561,18 @@ class StateMachine:
     
     def process_event(self, event):
         """Process an event based on the current state"""
+        print(f"Processing event: {event}")
+        
         # Handle global events that apply in any state
         if event.type == EventType.ESTOP_ACTIVATED:
             self.transition_to(SystemState.ERROR)
-            return
+            return True
             
         # Let the current state handler process the event
         if self.current_state in self.state_handlers:
-            self.state_handlers[self.current_state](event)
+            return self.state_handlers[self.current_state](event)
+            
+        return False
     
     def update(self):
         """Update the state machine"""
@@ -524,16 +600,19 @@ class StateMachine:
         if self.current_state == SystemState.SELF_CHECK and elapsed_time >= 3.0:
             self.process_event(Event(EventType.TIMEOUT, {"state": SystemState.SELF_CHECK}))
     
-    # Individual state handlers
+    # Individual state handlers - return True if event was handled
     def _handle_idle(self, event):
         """Handle IDLE state events"""
         if event is None:
             # No event, just regular update
-            return
+            return False
             
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "INITIALIZE":
-                self.transition_to(SystemState.SYSTEM_ARMED)
+                self.transition_to(SystemState.SELF_CHECK)
+                return True
+                
+        return False
     
     def _handle_self_check(self, event):
         """Handle SELF_CHECK state events"""
@@ -545,23 +624,29 @@ class StateMachine:
                 print("Running self-check diagnostic...")
                 # Run self check in a non-blocking way
                 if run_self_check(self.safety_manager):
-                    # Schedule a timeout to transition to IDLE
+                    # Self-check complete, will wait for timeout to transition
                     pass
-            return
+            return False
             
         if event.type == EventType.TIMEOUT:
             # Self-check timeout, transition to IDLE
-            self.transition_to(SystemState.IDLE)
+            self.transition_to(SystemState.SYSTEM_ARMED)
+            return True
+            
+        return False
     
     def _handle_system_armed(self, event):
         """Handle SYSTEM_ARMED state events"""
         if event is None:
             # No event, just regular update
-            return
+            return False
             
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.WARM_UP)
+                return True
+                
+        return False
     
     def _handle_heating_state(self, temp):
         """Common handler for all heating states"""
@@ -583,15 +668,19 @@ class StateMachine:
             # Check if setpoint reached
             if temp is not None and temp >= WARM_UP_SETPOINT:
                 self.transition_to(SystemState.WARM_UP_COMPLETE)
-            return
+            return False
             
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.SHUTDOWN)
+                return True
                 
         elif event.type == EventType.TEMPERATURE_REACHED:
             if event.data == "WARM_UP":
                 self.transition_to(SystemState.WARM_UP_COMPLETE)
+                return True
+                
+        return False
     
     def _handle_warm_up_complete(self, event):
         """Handle WARM_UP_COMPLETE state events"""
@@ -600,11 +689,14 @@ class StateMachine:
         self._handle_heating_state(temp)
         
         if event is None:
-            return
+            return False
             
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.FULL_TEMP)
+                return True
+                
+        return False
     
     def _handle_full_temp(self, event):
         """Handle FULL_TEMP state events"""
@@ -616,15 +708,19 @@ class StateMachine:
             # Check if setpoint reached
             if temp is not None and temp >= FULL_TEMP_SETPOINT:
                 self.transition_to(SystemState.FULL_TEMP_COMPLETE)
-            return
+            return False
             
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.WARM_UP)
+                return True
                 
         elif event.type == EventType.TEMPERATURE_REACHED:
             if event.data == "FULL_TEMP":
                 self.transition_to(SystemState.FULL_TEMP_COMPLETE)
+                return True
+                
+        return False
     
     def _handle_full_temp_complete(self, event):
         """Handle FULL_TEMP_COMPLETE state events"""
@@ -633,16 +729,19 @@ class StateMachine:
         self._handle_heating_state(temp)
         
         if event is None:
-            return
+            return False
             
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.SHUTDOWN)
+                return True
+                
+        return False
     
     def _handle_error(self, event):
         """Handle ERROR state events"""
         if event is None:
-            return
+            return False
             
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "INITIALIZE" and self.safety_manager.error_code != 100:
@@ -650,12 +749,16 @@ class StateMachine:
                 self.safety_manager.error_code = 0
                 self.safety_manager.error_message = ""
                 self.transition_to(SystemState.IDLE)
+                return True
                 
         elif event.type == EventType.ESTOP_CLEARED:
             if self.safety_manager.error_code == 100:
                 # Clear E-STOP error after E-STOP is physically reset
                 self.safety_manager.error_code = 0
                 self.safety_manager.error_message = ""
+                return True
+                
+        return False
     
     def _handle_shutdown(self, event):
         """Handle SHUTDOWN state events"""
@@ -666,7 +769,9 @@ class StateMachine:
             else:
                 # Shutdown complete
                 self.transition_to(SystemState.IDLE)
-            return
+            return False
+            
+        return False
 
 # Configuration constants
 # Temperature setpoints
@@ -694,6 +799,9 @@ BLINK_INTERVAL_SLOW = 1.0  # Slow blink interval in seconds
 BLINK_INTERVAL_FAST = 0.3  # Fast blink interval in seconds
 ERROR_BLINK_COUNT = 5      # Number of blinks in error pattern
 ERROR_BLINK_INTERVAL = 0.5 # Time between error blinks
+
+# Startup guard time
+STARTUP_GUARD_TIME = 2.0  # Time after startup before processing buttons
 
 # Function to read temperature safely
 def read_temperature(safety_manager):
@@ -738,7 +846,7 @@ def read_current(safety_manager):
 def run_self_check(safety_manager):
     print("Running self-check diagnostic...")
     
-    # Test all lights in sequence - this should be in LED manager now
+    # Test all lights in sequence
     led_manager.perform_sequential_test()
     
     # Check modules
@@ -768,7 +876,7 @@ def run_self_check(safety_manager):
         safety_manager.set_error(13, f"SCR output test failed: {e}")
         return False
     
-    print("Self-check complete: System IDLE")
+    print("Self-check complete: System ready")
     return True
 
 # Initialize P1AM Base and modules
@@ -810,10 +918,10 @@ initialize_button_input = button_module.inputs[1]  # Initialize button
 start_button_input = button_module.inputs[2]      # Start/Shutdown button
 estop_button_input = button_module.inputs[3]      # E-STOP button
 
-# Create button objects
-initialize_button = Button(initialize_button_input, is_normally_closed=True)
-start_button = Button(start_button_input, is_normally_closed=True)
-estop_button = Button(estop_button_input, is_normally_closed=False)  # E-STOP is normally open
+# Create button objects with improved debouncing
+initialize_button = Button(initialize_button_input, debounce_time=0.05, consistent_readings=3, is_normally_closed=True)
+start_button = Button(start_button_input, debounce_time=0.05, consistent_readings=3, is_normally_closed=True)
+estop_button = Button(estop_button_input, debounce_time=0.05, consistent_readings=3, is_normally_closed=False)  # E-STOP is normally open
 
 # Initialize PID controller - output directly maps to 4-20mA for SCR control
 pid = PIDController(
@@ -835,6 +943,9 @@ state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
 last_print_time = 0
 print_interval = 1.0  # Status print interval in seconds
 
+# Startup time for guard period
+startup_time = time.monotonic()
+
 print("System initialized.")
 print("Beginning control loop...")
 print("Press INITIALIZE button (green) to begin")
@@ -842,16 +953,21 @@ print("Press INITIALIZE button (green) to begin")
 # Main control loop
 while True:
     try:
-        # Update button states and generate events
+        # Update button states
         initialize_state = initialize_button.update()
         start_state = start_button.update()
         
-        # Create button events when needed
-        if initialize_state == ButtonState.PRESSED:
-            state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))
-        
-        if start_state == ButtonState.PRESSED:
-            state_machine.process_event(Event(EventType.BUTTON_PRESSED, "START"))
+        # Apply startup guard time - don't process button events during startup
+        current_time = time.monotonic()
+        if current_time - startup_time > STARTUP_GUARD_TIME:
+            # Check for and process button events
+            if initialize_button.get_event_and_clear():
+                print("INITIALIZE button pressed")
+                state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))
+            
+            if start_button.get_event_and_clear():
+                print("START button pressed")
+                state_machine.process_event(Event(EventType.BUTTON_PRESSED, "START"))
         
         # Update state machine
         state_machine.update()
@@ -864,7 +980,6 @@ while True:
         current_reading = read_current(safety_manager)
         
         # Print status periodically
-        current_time = time.monotonic()
         if current_time - last_print_time >= print_interval:
             # Format temperature and current readings
             temp_str = f"{current_temp:.1f}°F" if current_temp is not None else "ERROR"
