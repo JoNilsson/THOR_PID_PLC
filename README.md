@@ -6,6 +6,8 @@ This project implements a sophisticated temperature control system for Terraform
 
 The control system employs a state machine architecture to manage the heating process through well-defined operational states from warm-up to full temperature operation, with comprehensive safety features and visual status indicators.
 
+For a detailed visual representation of the control system operation, see the [flowchart](flowchart.md) and [state machine diagram](plc_operation_flowchart.mmd).
+
 ## Hardware Configuration
 
 - **P1AM-200 PLC**: Main control unit
@@ -51,6 +53,8 @@ The control system employs a state machine architecture to manage the heating pr
 - Implemented proper scaling from 4-20mA signal to 0-100A values
 - Added signal integrity diagnostic checks
 
+For detailed information about this refactor, see [current_monitoring_changes.md](current_monitoring_changes.md) and [ct_hardware_refactor.md](ct_hardware_refactor.md).
+
 ### State Machine Implementation
 
 **Challenge**: System auto-transitioning through states without expected button triggers  
@@ -59,6 +63,8 @@ The control system employs a state machine architecture to manage the heating pr
 - Improved Button class with state history and debouncing
 - Added startup guard time to delay button event processing
 - Implemented state transition validation with parent-child relationships
+
+For detailed information about state machine problems and solutions, see [state_machine_issues.md](state_machine_issues.md).
 
 ### Architecture Transition
 
