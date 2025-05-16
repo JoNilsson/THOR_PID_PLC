@@ -86,6 +86,8 @@ For detailed information about state machine problems and solutions, see [state_
 
 ## Changelog
 
+For detailed information about code updates and changes, see [code_updates.md](code_updates.md) and [notes.md](notes.md).
+
 ### v1.3.0 (Current)
 
 - Refactored current transformer implementation
