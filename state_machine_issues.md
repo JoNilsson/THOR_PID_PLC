@@ -62,11 +62,7 @@ def _handle_system_armed(self, event):
 - When the system starts up, the button inputs may not be in a known stable state
 - The Button class could be misinterpreting the initial reading as a button press
 
-### 4. LED Management Issues
-
-IDENTIFIED AS A NON-ISSUE
-
-### 5. Missing Self-Check State
+### 4. Missing Self-Check State
 
 The log shows the system going directly from IDLE to SYSTEM_ARMED, skipping the SELF_CHECK state:
 
@@ -120,10 +116,6 @@ def _handle_idle(self, event):
 ```
 
 State handlers don't return a value to indicate if they handled the event, so multiple handlers might try to process the same event.
-
-### 4. LED Pattern Management
-
-CONCERN REMOVED
 
 ## Recommendations for Fixes
 
@@ -179,11 +171,7 @@ def transition_to(self, new_state, record_history=True):
     # ...
 ```
 
-### 4. Separate LED Pattern Timers
-
-ACTION ITEM REMOVED
-
-### 5. Implement Proper Hierarchical State Machine
+### 4. Implement Proper Hierarchical State Machine
 
 Define clear parent-child relationships for states and only allow specific transitions:
 
@@ -202,7 +190,7 @@ for state in VALID_TRANSITIONS:
         VALID_TRANSITIONS[state].append(SystemState.ERROR)
 ```
 
-### 6. Add More Debug Logging
+### 5. Adding More Debug Logging
 
 Add comprehensive logging around state transitions and event processing:
 
@@ -214,12 +202,3 @@ def process_event(self, event):
     # Event handling logic
     # ...
 ```
-
-## Conclusion
-
-The primary issue with the refactored state machine appears to be in the button handling and event processing components. The system is triggering state transitions without actual button presses, likely due to misinterpreted initial states or improper debouncing.
-
-The LED management also has timing issues that need to be addressed. By implementing the fixes outlined above, the state machine should properly wait for actual button presses before changing states, and should follow the intended state flow.
-
-The recommendation is to focus first on button debouncing and startup guard time fixes, as these are likely the root causes of the unexpected state transitions.
-

@@ -34,7 +34,7 @@ FULL_TEMP_SETPOINT = 150.0  # Target full operation temperature in degrees F
 TEMP_HYSTERESIS = 5.0  # Hysteresis to prevent threshold oscillation
 
 # Current monitoring thresholds
-CURRENT_THRESHOLD = 180.0  # Amperes - SCR output threshold (assuming 200A max)
+CURRENT_THRESHOLD = 70.0  # Amperes, SCR output threshold
 
 # PID tuning parameters
 KP = 2.0  # Proportional gain

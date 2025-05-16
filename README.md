@@ -42,8 +42,6 @@ For a detailed visual representation of the control system operation, see the [f
 - Comprehensive error handling with specific error codes
 - Debug logging capabilities
 
-For detailed information about implementation and technical design, see [report.md](report.md).
-
 ## Technical Challenges and Solutions
 
 ### Current Monitoring Hardware Refactor
@@ -87,8 +85,6 @@ For detailed information about state machine problems and solutions, see [state_
 - Developed graceful shutdown procedures
 
 ## Changelog
-
-For detailed information about code updates and changes, see [code_updates.md](code_updates.md) and [notes.md](notes.md).
 
 ### v1.3.0 (Current)
 
@@ -138,4 +134,3 @@ For detailed information about code updates and changes, see [code_updates.md](c
 ## License
 
 Proprietary - All rights reserved - © Terraform Industries 2025
-
