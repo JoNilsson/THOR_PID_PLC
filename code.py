@@ -24,7 +24,36 @@ Written for controlling a Dwyer-Omega SCR39-48-080-S9
 
 import time
 import P1AM
-#from P1AM.constants import *
+
+# Configuration constants
+# Temperature setpoints
+WARM_UP_SETPOINT = 100.0  # Initial warm-up temperature in degrees F
+FULL_TEMP_SETPOINT = 150.0  # Target full operation temperature in degrees F
+
+# Temperature thresholds
+TEMP_HYSTERESIS = 5.0  # Hysteresis to prevent threshold oscillation
+
+# Current monitoring thresholds
+CURRENT_THRESHOLD = 180.0  # Amperes - SCR output threshold (assuming 200A max)
+
+# PID tuning parameters
+KP = 2.0  # Proportional gain
+KI = 0.1  # Integral gain
+KD = 0.5  # Derivative gain
+
+# Analog output scaling
+MIN_COUNT = 819   # Corresponds to 4mA
+MAX_COUNT = 4095  # Corresponds to 20mA
+HEATING_THRESHOLD = 6.0  # mA - SCR is actively heating when output > this value
+
+# Light pattern parameters
+BLINK_INTERVAL_SLOW = 1.0  # Slow blink interval in seconds
+BLINK_INTERVAL_FAST = 0.3  # Fast blink interval in seconds
+ERROR_BLINK_COUNT = 5      # Number of blinks in error pattern
+ERROR_BLINK_INTERVAL = 0.5 # Time between error blinks
+
+# Startup guard time
+STARTUP_GUARD_TIME = 2.0  # Time after startup before processing buttons
 
 # System state constants (instead of enum)
 class SystemState:
@@ -773,36 +802,6 @@ class StateMachine:
             
         return False
 
-# Configuration constants
-# Temperature setpoints
-WARM_UP_SETPOINT = 100.0  # Initial warm-up temperature in degrees F
-FULL_TEMP_SETPOINT = 150.0  # Target full operation temperature in degrees F
-
-# Temperature thresholds
-TEMP_HYSTERESIS = 5.0  # Hysteresis to prevent threshold oscillation
-
-# Current monitoring thresholds
-CURRENT_THRESHOLD = 180.0  # Amperes - SCR output threshold (assuming 200A max)
-
-# PID tuning parameters
-KP = 2.0  # Proportional gain
-KI = 0.1  # Integral gain
-KD = 0.5  # Derivative gain
-
-# Analog output scaling
-MIN_COUNT = 819   # Corresponds to 4mA
-MAX_COUNT = 4095  # Corresponds to 20mA
-HEATING_THRESHOLD = 6.0  # mA - SCR is actively heating when output > this value
-
-# Light pattern parameters
-BLINK_INTERVAL_SLOW = 1.0  # Slow blink interval in seconds
-BLINK_INTERVAL_FAST = 0.3  # Fast blink interval in seconds
-ERROR_BLINK_COUNT = 5      # Number of blinks in error pattern
-ERROR_BLINK_INTERVAL = 0.5 # Time between error blinks
-
-# Startup guard time
-STARTUP_GUARD_TIME = 2.0  # Time after startup before processing buttons
-
 # Function to read temperature safely
 def read_temperature(safety_manager):
     try:
@@ -814,6 +813,10 @@ def read_temperature(safety_manager):
     except Exception as e:
         safety_manager.set_error(1, f"Temperature reading error: {e}")
         return None
+
+#TODO: 
+# Presently the CTs we have don't output a RAW value that can be interpreted
+# by the P1-04AD module.  Need CTs that output a conditioned 4-20ma signal
 
 # Function to read current safely
 def read_current(safety_manager):
