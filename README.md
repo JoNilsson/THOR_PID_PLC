@@ -29,7 +29,7 @@ For a detailed visual representation of the control system operation, see the [f
 
 ## Key Features
 
-- PID temperature control with anti-windup protection
+- PID temperature control with [anti-windup](https://ocw.mit.edu/courses/16-30-feedback-control-systems-fall-2010/8c33eb306938cac6cd73e701a86a5b32_MIT16_30F10_lec23.pdf) protection
 - State machine architecture with proper entry/exit actions
 - Comprehensive safety monitoring and error handling
 - Debounced physical button interface to avoid erroneous button interactions
