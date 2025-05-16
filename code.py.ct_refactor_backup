@@ -14,7 +14,7 @@ Hardware Configuration:
 - P1AM-ETH, P1AM-GPIO, P1AM-SERIAL
 - P1AM-200 CPU
 - Slot 1: P1-04THM with K-type thermocouples
-- Slot 2: P1-04AD for 4-20mA current transformer module monitoring
+- Slot 2: P1-04AD for current transformer monitoring
 - Slot 3: P1-08TRS for status indicators
 - Slot 4: P1-04DAL-1 for SCR control
 - Slot 5: P1-15CDD1 for button inputs
@@ -420,7 +420,6 @@ class SafetyManager:
         self.current_current = None
         self.error_code = 0
         self.error_message = ""
-        self.current_warning = ""  # Added to store warnings that don't trigger errors
     
     def check_estop(self):
         """
@@ -815,43 +814,33 @@ def read_temperature(safety_manager):
         safety_manager.set_error(1, f"Temperature reading error: {e}")
         return None
 
-# Function to read current safely using the 4-20mA current module
+#TODO: 
+# Presently the CTs we have don't output a RAW value that can be interpreted
+# by the P1-04AD module.  Need CTs that output a conditioned 4-20ma signal
+
+# Function to read current safely
 def read_current(safety_manager):
     try:
-        # Read the 4-20mA signal from Channel 2 of the P1-04AD module
-        # (connected to the current transformer module that outputs 4-20mA)
-        raw_signal = current_module[2].value
+        # Read current transformer values
+        ct1 = current_module[1].value  # Phase 1 current
+        ct2 = current_module[2].value  # Phase 2 current
+        ct3 = current_module[3].value  # Phase 3 current
         
-        # Calculate the percentage of full scale (4mA = 0%, 20mA = 100%)
-        # First convert raw value to mA
-        signal_ma = (raw_signal / MAX_COUNT) * 20.0
-        
-        # Store warning message for low signal (open circuit) but don't trigger error
-        safety_manager.current_warning = ""
-        
-        # Check for signal integrity issues (signal outside 4-20mA range)
-        if signal_ma < 3.8:  # Allow for slight measurement error
-            # For open circuit, just set a warning message instead of an error
-            safety_manager.current_warning = f"Low current signal: {signal_ma:.2f}mA - possible open circuit"
-            # Return 0 current when signal is below 4mA range
-            return 0.0
-        elif signal_ma > 20.2:  # Allow for slight measurement error
-            safety_manager.set_error(4, f"Current signal too high: {signal_ma:.2f}mA - possible fault condition")
-            return None
-            
-        # Convert 4-20mA to 0-100A (using the low range setting of the current module)
-        # 4mA = 0A, 20mA = 100A
-        current_value = ((signal_ma - 4.0) / 16.0) * 100.0
-        if current_value < 0:
-            current_value = 0  # Ensure we don't return negative current values
+        # Convert raw values to amperes (scaling depends on CT setup)
+        # This scaling would need to be calibrated for the specific CTs used
+        current_a = ct1 * 0.333 # Example scaling for 200A/0.333V CT
+        current_b = ct2 * 0.333
+        current_c = ct3 * 0.333
         
         # Check for overcurrent condition
-        if current_value > CURRENT_THRESHOLD:
-            safety_manager.set_error(2, f"Overcurrent detected: {current_value:.1f}A")
+        if (current_a > CURRENT_THRESHOLD or 
+            current_b > CURRENT_THRESHOLD or 
+            current_c > CURRENT_THRESHOLD):
+            safety_manager.set_error(2, f"Overcurrent detected: A={current_a:.1f}, B={current_b:.1f}, C={current_c:.1f}")
             return None
             
-        # Return the calculated current value
-        return current_value
+        # Return average current for monitoring
+        return (current_a + current_b + current_c) / 3
     except Exception as e:
         safety_manager.set_error(3, f"Current reading error: {e}")
         return None
@@ -878,13 +867,9 @@ def run_self_check(safety_manager):
     # Check current transformer readings
     current = read_current(safety_manager)
     if current is None:
-        # Only fail if it's a real error, not just an open circuit (which returns 0.0)
         safety_manager.set_error(12, "Failed to read current during self-check")
         return False
     print(f"Initial current reading: {current:.2f}A")
-    # Display warning if current is 0 but don't fail the self-check
-    if current == 0 and safety_manager.current_warning:
-        print(f"WARNING: {safety_manager.current_warning} - This is normal if system is not actively heating")
     
     # Test SCR output (brief test at minimum)
     try:
@@ -916,9 +901,6 @@ thm_module.configure_module((0x40, 0x03, 0x60, 0x05,
                            0x00, 0x00, 0x00, 0x00))
 
 # Set up current monitoring module
-# The P1-04AD in slot 2 is now connected to a 4-20mA current transformer module
-# Positive connected to Channel 2 input, Negative connected to Channel 10 com input
-# The CT module is configured for low range (0-100A)
 current_module = base[2]  # P1-04AD in slot 2
 
 # Set up relay module for status indicators
@@ -1022,11 +1004,6 @@ while True:
             print(f"State: {state_str} | E-STOP: {estop_status} | Temp: {temp_str} | Current: {curr_str} | Output: {output_str}")
             print(f"Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
             
-            # Display any warnings (like current signal warnings)
-            if safety_manager.current_warning:
-                print(f"WARNING: {safety_manager.current_warning}")
-                
-            # Display any errors
             if safety_manager.error_code != 0:
                 print(f"ERROR {safety_manager.error_code}: {safety_manager.error_message}")
             

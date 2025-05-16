@@ -1,4 +1,35 @@
-# Code Update Action Plan: Aligning code.py with flowchart.md
+# Code Updates Changelog
+
+## Current Transformer Hardware Refactor (2025-05-15) [UPDATED]
+
+The hardware for current monitoring has been upgraded from multiple current transformers to a single module that outputs a 4-20mA standard signal.
+
+**Update (2025-05-15):** Modified error handling to treat low current signal (open circuit) as a warning rather than an error. This prevents false error states when the system is not actively heating.
+
+### Changes Made:
+1. Updated the `read_current()` function to use the new 4-20mA current transformer module
+   - Changed to read from Channel 2 of the P1-04AD module
+   - Implemented proper scaling from 4-20mA signal to 0-100A current values
+   - Added signal integrity diagnostic checks (< 3.8mA or > 20.2mA indicates fault)
+   - Removed obsolete multi-phase monitoring code (as new module provides averaged output)
+
+2. Updated code comments and documentation
+   - Added detailed comment about the new hardware connection (P1-04AD Channel 2)
+   - Updated hardware configuration description
+
+### Technical Details:
+- The new current monitoring hardware outputs a standard 4-20mA signal
+- Signal corresponds to 0-100A (low range setting on the module)
+- Positive connection: Channel 2 input on P1-04AD
+- Negative connection: Channel 10 com input on P1-04AD
+
+### References:
+- See datasheet: https://cdn.automationdirect.com/static/specs/acuamp3act3actr.pdf
+- See ct_hardware_refactor.md for full implementation plan
+
+---
+
+# Previous Action Plan: Aligning code.py with flowchart.md
 
 This document outlines the necessary changes to align the current `code.py` implementation with the system described in the `flowchart.md` document.
 
