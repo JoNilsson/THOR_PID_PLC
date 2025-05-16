@@ -46,7 +46,8 @@ For a detailed visual representation of the control system operation, see the [f
 
 ### Current Monitoring Hardware Refactor
 
-**Challenge**: Transitioning from multiple separate current transformers to a single 4-20mA output module  
+**Challenge**: Transitioning from multiple separate current transformers to a [single 4-20mA output module](https://cdn.automationdirect.com/static/manuals/acuampinserts/3act_3actr_installation.pdf)
+
 **Solution**:
 
 - Updated `read_current()` function to use Channel 2 of P1-04AD module
