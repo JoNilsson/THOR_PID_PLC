@@ -42,6 +42,8 @@ For a detailed visual representation of the control system operation, see the [f
 - Comprehensive error handling with specific error codes
 - Debug logging capabilities
 
+For detailed information about implementation and technical design, see [report.md](report.md).
+
 ## Technical Challenges and Solutions
 
 ### Current Monitoring Hardware Refactor
