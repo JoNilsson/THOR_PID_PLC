@@ -15,7 +15,7 @@ The temperature control system for the THOR SiC Heater Control System currently 
 
 ## Current Error Handling System
 
-The existing code implements robust error handling through. So as long as the operator is concious of the blower state, it should present no safety hazards. The code currently implements the following error systems;
+The existing code implements robust error handling. So as long as the operator is concious of the blower state, it should present no safety hazards. The code currently implements the following error systems;
 
 1. **SafetyManager Class**: Centralizes all safety checks and error reporting
 2. **Error State Handling**: Dedicated ERROR state in the state machine
