@@ -24,6 +24,9 @@ Written for controlling a Dwyer-Omega SCR39-48-080-S9
 
 import time
 import P1AM
+import board
+import digitalio
+from blower_monitor import BlowerMonitor
 
 # Configuration constants
 # Temperature setpoints
@@ -66,7 +69,7 @@ class SystemState:
     FULL_TEMP_COMPLETE = 6
     ERROR = 7
     SHUTDOWN = 8
-    
+
     # Dictionary to convert state values to names for display
     NAMES = {
         0: "IDLE",
@@ -79,7 +82,7 @@ class SystemState:
         7: "ERROR",
         8: "SHUTDOWN"
     }
-    
+
     # Define valid state transitions
     VALID_TRANSITIONS = {
         IDLE: [SELF_CHECK, ERROR],
@@ -119,52 +122,52 @@ class PIDController:
         self.sample_time = sample_time  # Time between PID calculations
         self.output_min = output_min  # Minimum output value
         self.output_max = output_max  # Maximum output value
-        
+
         # Internal state variables
         self.last_error = 0
         self.integral = 0
         self.last_time = time.monotonic()
         self.last_process_variable = 0
-        
+
     def compute(self, process_variable):
         current_time = time.monotonic()
         elapsed_time = current_time - self.last_time
-        
+
         # Only compute if sample_time has elapsed
         if elapsed_time >= self.sample_time:
             # Calculate error
             error = self.setpoint - process_variable
-            
+
             # Proportional term
             p_term = self.kp * error
-            
+
             # Integral term (with anti-windup)
             self.integral += error * elapsed_time
             i_term = self.ki * self.integral
-            
+
             # Derivative term (on process variable, not error)
             derivative = 0
             if elapsed_time > 0:
                 derivative = (process_variable - self.last_process_variable) / elapsed_time
             d_term = -self.kd * derivative  # Negative because we want to counteract change
-            
+
             # Save values for next iteration
             self.last_error = error
             self.last_time = current_time
             self.last_process_variable = process_variable
-            
+
             # Calculate output
             output = p_term + i_term + d_term
-            
+
             # Apply output limits
             output = max(self.output_min, min(self.output_max, output))
-            
+
             # If output is at limits, prevent integral windup
             if (output == self.output_min or output == self.output_max) and error * output > 0:
                 self.integral -= error * elapsed_time
-            
+
             return output
-        
+
         return None  # No new output if sample time hasn't elapsed
 
     def update_setpoint(self, new_setpoint):
@@ -186,16 +189,16 @@ class Button:
         self.previous_state = ButtonState.NOT_PRESSED
         self.is_normally_closed = is_normally_closed
         self.event_fired = False  # Track if event was fired for this press
-    
+
     def update(self):
         # Read the current value of the button input
         current_reading = self.digital_in.value
         current_time = time.monotonic()
-        
+
         # Shift history and add new reading
         self.reading_history.pop(0)
         self.reading_history.append(current_reading)
-        
+
         # Only process if debounce time has elapsed
         if current_time - self.last_change_time > self.debounce_time:
             # Convert reading to a button state
@@ -203,16 +206,16 @@ class Button:
                 button_pressed = True
             else:
                 button_pressed = False
-                
+
             # Check if all readings in history are consistent
             if all(r == self.reading_history[0] for r in self.reading_history):
                 # State has been stable for multiple readings
-                
+
                 # Check if state has changed
                 if button_pressed != self.last_state:
                     self.last_change_time = current_time
                     self.last_state = button_pressed
-                    
+
                     if button_pressed:
                         self.previous_state = self.current_state
                         self.current_state = ButtonState.PRESSED
@@ -220,10 +223,10 @@ class Button:
                     else:
                         self.previous_state = self.current_state
                         self.current_state = ButtonState.RELEASED
-        
+
         # Return current button state
         return self.current_state
-        
+
     def get_event_and_clear(self):
         """Get an event if a button press hasn't been processed yet"""
         if self.current_state == ButtonState.PRESSED and not self.event_fired:
@@ -237,7 +240,7 @@ class Event:
         self.type = event_type
         self.data = data
         self.timestamp = time.monotonic()
-        
+
     def __str__(self):
         return f"Event(type={self.type}, data={self.data})"
 
@@ -248,7 +251,7 @@ class LEDManager:
         self.amber = amber
         self.blue = blue
         self.red = red
-        
+
         # Separate timers and states for each LED
         self.pattern_timers = {
             "green": time.monotonic(),
@@ -262,7 +265,7 @@ class LEDManager:
             "blue": False,
             "red": False
         }
-        
+
         # Define LED patterns
         self.patterns = {
             "OFF": self._pattern_off,
@@ -271,7 +274,7 @@ class LEDManager:
             "FAST_BLINK": self._pattern_fast_blink,
             "ERROR_BLINK": self._pattern_error_blink
         }
-        
+
         # Current active patterns for each LED
         self.active_patterns = {
             "green": "OFF",
@@ -279,102 +282,102 @@ class LEDManager:
             "blue": "OFF",
             "red": "OFF"
         }
-        
+
         # Initialize all LEDs to off
         self.reset_all()
-    
+
     def reset_all(self):
         """Turn off all LEDs"""
         self.green.value = False
         self.amber.value = False
         self.blue.value = False
         self.red.value = False
-    
+
     def set_pattern(self, led_name, pattern_name):
         """Set a specific pattern for a specific LED"""
         if led_name in ["green", "amber", "blue", "red"] and pattern_name in self.patterns:
             self.active_patterns[led_name] = pattern_name
             print(f"Set {led_name} LED to {pattern_name} pattern")
-    
+
     def set_state_indication(self, system_state):
         """Configure LED patterns based on current system state"""
         # Reset all patterns first to avoid conflicts
         for led in ["green", "amber", "blue", "red"]:
             self.active_patterns[led] = "OFF"
-            
+
         # Set patterns based on state
         if system_state == SystemState.IDLE:
             self.active_patterns["green"] = "SLOW_BLINK"
-            
+
         elif system_state == SystemState.SELF_CHECK:
             self.active_patterns["green"] = "FAST_BLINK"
-            
+
         elif system_state == SystemState.SYSTEM_ARMED:
             self.active_patterns["green"] = "ON"
-            
+
         elif system_state == SystemState.WARM_UP:
             self.active_patterns["green"] = "ON"
             self.active_patterns["amber"] = "SLOW_BLINK"
-            
+
         elif system_state == SystemState.WARM_UP_COMPLETE:
             self.active_patterns["green"] = "ON"
             self.active_patterns["amber"] = "ON"
-            
+
         elif system_state == SystemState.FULL_TEMP:
             self.active_patterns["green"] = "ON"
             self.active_patterns["blue"] = "SLOW_BLINK"
-            
+
         elif system_state == SystemState.FULL_TEMP_COMPLETE:
             self.active_patterns["green"] = "ON"
             self.active_patterns["blue"] = "ON"
-            
+
         elif system_state == SystemState.ERROR:
             self.active_patterns["red"] = "ERROR_BLINK"
-            
+
         elif system_state == SystemState.SHUTDOWN:
             # Keep current patterns but make them blink
             for led in ["green", "amber", "blue"]:
                 if self.active_patterns[led] == "ON":
                     self.active_patterns[led] = "FAST_BLINK"
-                    
+
         print(f"Updated LED patterns for state: {SystemState.NAMES[system_state]}")
-    
+
     def update(self):
         """Update all LED states based on their current patterns"""
         current_time = time.monotonic()
-        
+
         # Update each LED according to its pattern
         if self.active_patterns["green"] != "OFF":
             self.patterns[self.active_patterns["green"]](self.green, "green", current_time)
-            
+
         if self.active_patterns["amber"] != "OFF":
             self.patterns[self.active_patterns["amber"]](self.amber, "amber", current_time)
-            
+
         if self.active_patterns["blue"] != "OFF":
             self.patterns[self.active_patterns["blue"]](self.blue, "blue", current_time)
-            
+
         if self.active_patterns["red"] != "OFF":
             self.patterns[self.active_patterns["red"]](self.red, "red", current_time)
-    
+
     # Pattern implementation methods
     def _pattern_off(self, led, led_name, current_time):
         led.value = False
-        
+
     def _pattern_on(self, led, led_name, current_time):
         led.value = True
-        
+
     def _pattern_slow_blink(self, led, led_name, current_time):
         if current_time - self.pattern_timers[led_name] > BLINK_INTERVAL_SLOW:
             self.pattern_timers[led_name] = current_time
             self.pattern_states[led_name] = not self.pattern_states[led_name]
             led.value = self.pattern_states[led_name]
-            
+
     def _pattern_fast_blink(self, led, led_name, current_time):
         if current_time - self.pattern_timers[led_name] > BLINK_INTERVAL_FAST:
             self.pattern_timers[led_name] = current_time
             self.pattern_states[led_name] = not self.pattern_states[led_name]
             led.value = self.pattern_states[led_name]
-            
+
     def _pattern_error_blink(self, led, led_name, current_time):
         if current_time - self.pattern_timers[led_name] > ERROR_BLINK_INTERVAL:
             self.pattern_timers[led_name] = current_time
@@ -384,7 +387,7 @@ class LEDManager:
     def perform_sequential_test(self):
         """Run a sequential LED test pattern"""
         self.reset_all()
-        
+
         # Flash each light 3 times sequentially
         for _ in range(3):
             # Green
@@ -392,19 +395,19 @@ class LEDManager:
             time.sleep(0.2)
             self.green.value = False
             time.sleep(0.1)
-            
+
             # Amber
             self.amber.value = True
             time.sleep(0.2)
             self.amber.value = False
             time.sleep(0.1)
-            
+
             # Blue
             self.blue.value = True
             time.sleep(0.2)
             self.blue.value = False
             time.sleep(0.1)
-            
+
             # Red
             self.red.value = True
             time.sleep(0.2)
@@ -421,7 +424,8 @@ class SafetyManager:
         self.error_code = 0
         self.error_message = ""
         self.current_warning = ""  # Added to store warnings that don't trigger errors
-    
+        self.blower_warning = ""   # Added to store blower-specific warnings
+
     def check_estop(self):
         """
         Checks if E-STOP is activated
@@ -429,7 +433,7 @@ class SafetyManager:
         Returns True if E-STOP is pressed (emergency condition)
         """
         return self.estop_input.value
-    
+
     def update(self):
         """
         Perform all safety checks and return safety status
@@ -437,7 +441,7 @@ class SafetyManager:
         """
         # Check E-STOP first - highest priority
         estop_state = self.check_estop()
-        
+
         # Detect E-STOP state changes
         if estop_state and not self.previous_estop_state:
             # E-STOP was just activated
@@ -446,24 +450,24 @@ class SafetyManager:
             self.previous_estop_state = estop_state
             print("E-STOP ACTIVATED")
             return False, Event(EventType.ESTOP_ACTIVATED)
-            
+
         elif not estop_state and self.previous_estop_state:
             # E-STOP was just cleared
             self.previous_estop_state = estop_state
             print("E-STOP CLEARED")
             return True, Event(EventType.ESTOP_CLEARED)
-        
+
         self.previous_estop_state = estop_state
-        
+
         # If E-STOP is active, report unsafe
         if estop_state:
             return False, None
-            
+
         # Add additional safety checks here if needed
-        
+
         # All checks passed
         return True, None
-    
+
     def set_error(self, code, message):
         """Set an error condition"""
         self.error_code = code
@@ -481,7 +485,7 @@ class StateMachine:
         self.led_manager = led_manager
         self.pid_controller = pid_controller
         self.scr_output = scr_output
-        
+
         # Register state handlers
         self.state_handlers = {
             SystemState.IDLE: self._handle_idle,
@@ -494,285 +498,285 @@ class StateMachine:
             SystemState.ERROR: self._handle_error,
             SystemState.SHUTDOWN: self._handle_shutdown
         }
-    
+
     def is_valid_transition(self, from_state, to_state):
         """Check if a state transition is valid"""
         if to_state in SystemState.VALID_TRANSITIONS.get(from_state, []):
             return True
         return False
-    
+
     def transition_to(self, new_state, record_history=True):
         """Transition to a new state with proper entry and exit actions"""
         if new_state == self.current_state:
             return
-            
+
         # Validate the transition
         if not self.is_valid_transition(self.current_state, new_state):
             print(f"ERROR: Invalid state transition from {SystemState.NAMES[self.current_state]} to {SystemState.NAMES[new_state]}")
             return
-            
+
         print(f"Transitioning from {SystemState.NAMES[self.current_state]} to {SystemState.NAMES[new_state]}")
-            
+
         # Store state history
         if record_history:
             self.state_history.append(self.current_state)
             if len(self.state_history) > 10:  # Limit history size
                 self.state_history.pop(0)
-                
+
         # Exit actions for current state
         self._exit_state(self.current_state)
-        
+
         # Change state
         previous_state = self.current_state
         self.current_state = new_state
         self.state_entry_time = time.monotonic()
-        
+
         # Entry actions for new state
         self._enter_state(new_state, previous_state)
-    
+ 
     def _enter_state(self, state, previous_state):
         """Perform entry actions for the given state"""
         print(f"Entering {SystemState.NAMES[state]} state")
-        
+
         # Configure LED patterns for the new state
         self.led_manager.set_state_indication(state)
-        
+
         # State-specific entry actions
         if state == SystemState.IDLE:
             # Set SCR to minimum value
             self.scr_output.real = 4.0
-            
+
         elif state == SystemState.SELF_CHECK:
             # Reset PID controller
             self.pid_controller.update_setpoint(WARM_UP_SETPOINT)
             self.pid_controller.integral = 0
             # Set SCR to minimum value
             self.scr_output.real = 4.0
-             
+
         elif state == SystemState.SYSTEM_ARMED:
             # Set SCR to minimum value
             self.scr_output.real = 4.0
-                       
+
         elif state == SystemState.WARM_UP:
             print(f"Setting warm-up setpoint: {WARM_UP_SETPOINT}°F")
             self.pid_controller.update_setpoint(WARM_UP_SETPOINT)
-            
+
         elif state == SystemState.WARM_UP_COMPLETE:
             print("Warm-up temperature reached")
-            
+
         elif state == SystemState.FULL_TEMP:
             print(f"Setting full temperature setpoint: {FULL_TEMP_SETPOINT}°F")
             self.pid_controller.update_setpoint(FULL_TEMP_SETPOINT)
-            
+
         elif state == SystemState.FULL_TEMP_COMPLETE:
             print("Full temperature reached")
-            
+
         elif state == SystemState.ERROR:
             # Set SCR to minimum value for safety
             self.scr_output.real = 4.0
             print(f"ERROR {self.safety_manager.error_code}: {self.safety_manager.error_message}")
-            
+
         elif state == SystemState.SHUTDOWN:
             # Begin graceful shutdown - LED patterns already set
             pass
-    
+
     def _exit_state(self, state):
         """Perform exit actions for the given state"""
         # State-specific exit actions
         if state == SystemState.SELF_CHECK:
             # Cleanup any self-check resources
             pass
-    
+
     def return_to_previous(self):
         """Return to the previous state"""
         if self.state_history:
             previous = self.state_history.pop()
             self.transition_to(previous, record_history=False)
-    
+
     def process_event(self, event):
         """Process an event based on the current state"""
         print(f"Processing event: {event}")
-        
+
         # Handle global events that apply in any state
         if event.type == EventType.ESTOP_ACTIVATED:
             self.transition_to(SystemState.ERROR)
             return True
-            
+
         # Let the current state handler process the event
         if self.current_state in self.state_handlers:
             return self.state_handlers[self.current_state](event)
-            
+
         return False
-    
+
     def update(self):
         """Update the state machine"""
         # Check safety first
         is_safe, safety_event = self.safety_manager.update()
-        
+
         # Process any safety events
         if safety_event:
             self.process_event(safety_event)
-            
+
         # Only run state-specific logic if safe
         if is_safe:
             # Check for state timeouts
             self._check_timeouts()
-            
+
             # Run the current state handler with no event
             if self.current_state in self.state_handlers:
                 self.state_handlers[self.current_state](None)
-    
+
     def _check_timeouts(self):
         """Check for state timeouts"""
         elapsed_time = time.monotonic() - self.state_entry_time
-        
+
         # State-specific timeout handling
         if self.current_state == SystemState.SELF_CHECK and elapsed_time >= 3.0:
             self.process_event(Event(EventType.TIMEOUT, {"state": SystemState.SELF_CHECK}))
-    
+
     # Individual state handlers - return True if event was handled
     def _handle_idle(self, event):
         """Handle IDLE state events"""
         if event is None:
             # No event, just regular update
             return False
-            
+
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "INITIALIZE":
                 self.transition_to(SystemState.SELF_CHECK)
                 return True
-                
+
         return False
-    
+
     def _handle_self_check(self, event):
         """Handle SELF_CHECK state events"""
         elapsed_time = time.monotonic() - self.state_entry_time
-        
+
         if event is None:
             # First time entry actions
             if elapsed_time < 0.1:
                 print("Running self-check diagnostic...")
                 # Run self check in a non-blocking way
-                if run_self_check(self.safety_manager):
+                if run_self_check(self.safety_manager, blower_monitor):
                     # Self-check complete, will wait for timeout to transition
                     pass
             return False
-            
+ 
         if event.type == EventType.TIMEOUT:
             # Self-check timeout, transition to IDLE
             self.transition_to(SystemState.SYSTEM_ARMED)
             return True
-            
+
         return False
-    
+
     def _handle_system_armed(self, event):
         """Handle SYSTEM_ARMED state events"""
         if event is None:
             # No event, just regular update
             return False
-            
+
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.WARM_UP)
                 return True
-                
+
         return False
-    
+
     def _handle_heating_state(self, temp):
         """Common handler for all heating states"""
         if temp is None:
             return
-            
+
         # Calculate and apply PID output
         output = self.pid_controller.compute(temp)
         if output is not None:
             self.scr_output.real = output
-    
+
     def _handle_warm_up(self, event):
         """Handle WARM_UP state events"""
         # First handle common heating behavior
         temp = read_temperature(self.safety_manager)
         self._handle_heating_state(temp)
-        
+
         if event is None:
             # Check if setpoint reached
             if temp is not None and temp >= WARM_UP_SETPOINT:
                 self.transition_to(SystemState.WARM_UP_COMPLETE)
             return False
-            
+
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.SHUTDOWN)
                 return True
-                
+
         elif event.type == EventType.TEMPERATURE_REACHED:
             if event.data == "WARM_UP":
                 self.transition_to(SystemState.WARM_UP_COMPLETE)
                 return True
-                
+
         return False
-    
+
     def _handle_warm_up_complete(self, event):
         """Handle WARM_UP_COMPLETE state events"""
         # Continue with heating behavior
         temp = read_temperature(self.safety_manager)
         self._handle_heating_state(temp)
-        
+
         if event is None:
             return False
-            
+
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.FULL_TEMP)
                 return True
-                
+
         return False
-    
+
     def _handle_full_temp(self, event):
         """Handle FULL_TEMP state events"""
         # First handle common heating behavior
         temp = read_temperature(self.safety_manager)
         self._handle_heating_state(temp)
-        
+
         if event is None:
             # Check if setpoint reached
             if temp is not None and temp >= FULL_TEMP_SETPOINT:
                 self.transition_to(SystemState.FULL_TEMP_COMPLETE)
             return False
-            
+
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.WARM_UP)
                 return True
-                
+
         elif event.type == EventType.TEMPERATURE_REACHED:
             if event.data == "FULL_TEMP":
                 self.transition_to(SystemState.FULL_TEMP_COMPLETE)
                 return True
-                
+
         return False
-    
+
     def _handle_full_temp_complete(self, event):
         """Handle FULL_TEMP_COMPLETE state events"""
         # Continue with heating behavior
         temp = read_temperature(self.safety_manager)
         self._handle_heating_state(temp)
-        
+
         if event is None:
             return False
-            
+
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "START":
                 self.transition_to(SystemState.SHUTDOWN)
                 return True
-                
+
         return False
-    
+
     def _handle_error(self, event):
         """Handle ERROR state events"""
         if event is None:
             return False
-            
+
         if event.type == EventType.BUTTON_PRESSED:
             if event.data == "INITIALIZE" and self.safety_manager.error_code != 100:
                 # Reset error state if not E-STOP error
@@ -780,16 +784,16 @@ class StateMachine:
                 self.safety_manager.error_message = ""
                 self.transition_to(SystemState.IDLE)
                 return True
-                
+
         elif event.type == EventType.ESTOP_CLEARED:
             if self.safety_manager.error_code == 100:
                 # Clear E-STOP error after E-STOP is physically reset
                 self.safety_manager.error_code = 0
                 self.safety_manager.error_message = ""
                 return True
-                
+
         return False
-    
+
     def _handle_shutdown(self, event):
         """Handle SHUTDOWN state events"""
         if event is None:
@@ -800,7 +804,7 @@ class StateMachine:
                 # Shutdown complete
                 self.transition_to(SystemState.IDLE)
             return False
-            
+
         return False
 
 # Function to read temperature safely
@@ -821,14 +825,14 @@ def read_current(safety_manager):
         # Read the 4-20mA signal from Channel 2 of the P1-04AD module
         # (connected to the current transformer module that outputs 4-20mA)
         raw_signal = current_module[2].value
-        
+
         # Calculate the percentage of full scale (4mA = 0%, 20mA = 100%)
         # First convert raw value to mA
         signal_ma = (raw_signal / MAX_COUNT) * 20.0
-        
+
         # Store warning message for low signal (open circuit) but don't trigger error
         safety_manager.current_warning = ""
-        
+
         # Check for signal integrity issues (signal outside 4-20mA range)
         if signal_ma < 3.8:  # Allow for slight measurement error
             # For open circuit, just set a warning message instead of an error
@@ -838,18 +842,18 @@ def read_current(safety_manager):
         elif signal_ma > 20.2:  # Allow for slight measurement error
             safety_manager.set_error(4, f"Current signal too high: {signal_ma:.2f}mA - possible fault condition")
             return None
-            
+
         # Convert 4-20mA to 0-100A (using the low range setting of the current module)
         # 4mA = 0A, 20mA = 100A
         current_value = ((signal_ma - 4.0) / 16.0) * 100.0
         if current_value < 0:
             current_value = 0  # Ensure we don't return negative current values
-        
+
         # Check for overcurrent condition
         if current_value > CURRENT_THRESHOLD:
             safety_manager.set_error(2, f"Overcurrent detected: {current_value:.1f}A")
             return None
-            
+
         # Return the calculated current value
         return current_value
     except Exception as e:
@@ -857,24 +861,24 @@ def read_current(safety_manager):
         return None
 
 # Self-check routine
-def run_self_check(safety_manager):
+def run_self_check(safety_manager, blower_monitor):
     print("Running self-check diagnostic...")
-    
+
     # Test all lights in sequence
     led_manager.perform_sequential_test()
-    
+
     # Check modules
     if len(base.io_modules) < 6:
         safety_manager.set_error(10, "Missing required modules")
         return False
-    
+
     # Check thermocouple readings
     temp = read_temperature(safety_manager)
     if temp is None:
         safety_manager.set_error(11, "Failed to read temperature during self-check")
         return False
     print(f"Initial temperature reading: {temp:.1f}°F")
-    
+
     # Check current transformer readings
     current = read_current(safety_manager)
     if current is None:
@@ -885,7 +889,18 @@ def run_self_check(safety_manager):
     # Display warning if current is 0 but don't fail the self-check
     if current == 0 and safety_manager.current_warning:
         print(f"WARNING: {safety_manager.current_warning} - This is normal if system is not actively heating")
-    
+
+    # Check blower operation
+    if blower_monitor:
+        blower_success, blower_message = blower_monitor.verify_during_self_check()
+        print(f"Blower verification: {blower_message}")
+
+        # If blower is required but not running, fail the self-check
+        if not blower_success:
+            safety_manager.set_error(101, blower_message)
+            safety_manager.blower_warning = blower_message
+            return False
+
     # Test SCR output (brief test at minimum)
     try:
         scr_output.real = 4.0
@@ -893,7 +908,7 @@ def run_self_check(safety_manager):
     except Exception as e:
         safety_manager.set_error(13, f"SCR output test failed: {e}")
         return False
-    
+
     print("Self-check complete: System ready")
     return True
 
@@ -957,6 +972,19 @@ pid = PIDController(
 
 # Initialize managers
 safety_manager = SafetyManager(estop_button_input)
+
+# Initialize blower monitor - after safety_manager is initialized
+blower_monitor = BlowerMonitor(
+    required_states=[
+        SystemState.SELF_CHECK, 
+        SystemState.SYSTEM_ARMED,
+        SystemState.WARM_UP, 
+        SystemState.WARM_UP_COMPLETE,
+        SystemState.FULL_TEMP, 
+        SystemState.FULL_TEMP_COMPLETE
+    ],
+    error_callback=safety_manager.set_error
+)
 led_manager = LEDManager(green_light, amber_light, blue_light, red_light)
 state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
 
@@ -977,7 +1005,7 @@ while True:
         # Update button states
         initialize_state = initialize_button.update()
         start_state = start_button.update()
-        
+
         # Apply startup guard time - don't process button events during startup
         current_time = time.monotonic()
         if current_time - startup_time > STARTUP_GUARD_TIME:
@@ -985,59 +1013,71 @@ while True:
             if initialize_button.get_event_and_clear():
                 print("INITIALIZE button pressed")
                 state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))
-            
+
             if start_button.get_event_and_clear():
                 print("START button pressed")
                 state_machine.process_event(Event(EventType.BUTTON_PRESSED, "START"))
-        
+
+        # Check blower status
+        is_blower_safe, blower_event = blower_monitor.check_blower(state_machine.current_state)
+        if not is_blower_safe and blower_event:
+            state_machine.process_event(blower_event)
+
         # Update state machine
         state_machine.update()
-        
+
         # Update LED manager
         led_manager.update()
-        
+
         # Read sensors for status reporting
         current_temp = read_temperature(safety_manager)
         current_reading = read_current(safety_manager)
-        
+
         # Print status periodically
         if current_time - last_print_time >= print_interval:
             # Format temperature and current readings
             temp_str = f"{current_temp:.1f}°F" if current_temp is not None else "ERROR"
             curr_str = f"{current_reading:.2f}A" if current_reading is not None else "ERROR"
-            
+
             # Status strings
             state_str = SystemState.NAMES[state_machine.current_state]
             output_str = f"{scr_output.real:.2f}mA" if state_machine.current_state not in [SystemState.IDLE, SystemState.ERROR] else "OFF"
-            
+
             # LED status
             green_status = "ON" if green_light.value else "OFF"
             amber_status = "ON" if amber_light.value else "OFF"
             blue_status = "ON" if blue_light.value else "OFF"
             red_status = "ON" if red_light.value else "OFF"
-            
+
             # E-STOP status
             estop_status = "ACTIVATED" if safety_manager.check_estop() else "NORMAL"
-            
-            print(f"State: {state_str} | E-STOP: {estop_status} | Temp: {temp_str} | Current: {curr_str} | Output: {output_str}")
+
+            # Blower status
+            blower_status = "RUNNING" if blower_monitor.blower_status else "OFF"
+
+            print(f"State: {state_str} | E-STOP: {estop_status} | Blower: {blower_status} | Temp: {temp_str} | Current: {curr_str} | Output: {output_str}")
             print(f"Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
-            
+
             # Display any warnings (like current signal warnings)
             if safety_manager.current_warning:
                 print(f"WARNING: {safety_manager.current_warning}")
-                
+
+            # Display any blower warnings
+            if safety_manager.blower_warning:
+                print(f"BLOWER WARNING: {safety_manager.blower_warning}")
+
             # Display any errors
             if safety_manager.error_code != 0:
                 print(f"ERROR {safety_manager.error_code}: {safety_manager.error_message}")
-            
+
             last_print_time = current_time
-            
+
     except Exception as e:
         # Unexpected error
         safety_manager.set_error(999, f"Unhandled exception: {e}")
         state_machine.transition_to(SystemState.ERROR)
         # Reset outputs to safe state
         scr_output.real = 4.0  # Minimum control signal
-    
+
     # Small delay to prevent CPU hogging
     time.sleep(0.01)
