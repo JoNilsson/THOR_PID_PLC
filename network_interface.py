@@ -59,10 +59,14 @@ class NetworkInterface:
             # Initialize Ethernet interface
             print("Initializing Ethernet interface...")
             
+            # Configure pins properly
+            cs.switch_to_output(value=True)  # CS high by default
+            reset.switch_to_output(value=True)  # Reset high by default
+            
             # Hardware reset of the WIZnet chip
-            reset.value = False
+            reset.value = False  # Assert reset (active low)
             time.sleep(0.1)
-            reset.value = True
+            reset.value = True   # Release reset
             time.sleep(0.2)  # Give chip time to stabilize
             
             # Initialize with retry logic

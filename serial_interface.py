@@ -27,6 +27,9 @@ class SerialInterface:
                              bits=8, parity=None, stop=1, 
                              timeout=0.1, receiver_buffer_size=256)
             
+            # Ensure DE pin is set as output before initializing
+            de_pin.switch_to_output(value=False)  # Start in receive mode
+            
             # Initialize RS-485 wrapper
             self.rs485 = RS485(uart, de_pin)
             

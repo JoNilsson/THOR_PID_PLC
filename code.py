@@ -1037,21 +1037,23 @@ state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
 command_processor_obj = command_processor.CommandProcessor(state_machine, safety_manager, pid, scr_output)
 
 # Initialize RS-485 serial interface for control
-# Using P1AM-SERIAL shield on TX1/RX1 with DE on D13
+# Using P1AM-SERIAL shield on TX1/RX1 with DE on D5
+# Note: Changed from D13 to D5 due to pin conflict
 serial_interface_obj = serial_interface.SerialInterface(
     command_processor=command_processor_obj,
     tx_pin=board.TX1,
     rx_pin=board.RX1,
-    de_pin=board.D13,
+    de_pin=board.D5,
     baudrate=9600
 )
 
 # Initialize TCP/IP network interface for data logging
-# Using P1AM-ETH shield with CS pin D4 and reset pin D5
+# Using P1AM-ETH shield with CS pin D4 and reset pin D6
+# Note: Changed reset pin from D5 to D6 due to pin conflict with RS-485 DE
 network_interface_obj = network_interface.NetworkInterface(
     command_processor=command_processor_obj,
     cs_pin=board.D4,
-    reset_pin=board.D5,
+    reset_pin=board.D6,
     port=23  # Standard telnet port
 )
 
