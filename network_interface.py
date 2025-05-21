@@ -36,7 +36,7 @@ class NetworkInterface:
         self.command_processor.set_network_interface(self)
         
         # CSV header for data logging
-        self.csv_header = "timestamp,state,temperature,current,output,blower_status"
+        self.csv_header = "timestamp,state,temperature,blower_temp,current,output,blower_status"
         
         # Variable for connected client
         self.client = None
