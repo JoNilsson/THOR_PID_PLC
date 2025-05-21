@@ -11,11 +11,11 @@ import time
 
 # Try to import Ethernet libraries, but make them optional
 try:
-    import adafruit_wiznet5k as wiznet
-    from adafruit_wiznet5k.adafruit_wiznet5k_socket import socket
+    from adafruit_wiznet5k.adafruit_wiznet5k import WIZNET5K
+    import adafruit_wiznet5k.adafruit_wiznet5k_socketpool as socketpool
     ETHERNET_AVAILABLE = True
-except ImportError:
-    print("WARNING: WIZnet5k library not available. Network logging disabled.")
+except ImportError as e:
+    print(f"WARNING: WIZnet5k library not available: {e}. Network logging disabled.")
     ETHERNET_AVAILABLE = False
 
 class NetworkInterface:
@@ -41,6 +41,9 @@ class NetworkInterface:
         # Variable for connected client
         self.client = None
         self.client_buffer = ""
+        self.server_socket = None  # Initialize to None for fallback mode
+        self.eth = None
+        self.pool = None
         
         # Skip Ethernet initialization if libraries not available
         if not ETHERNET_AVAILABLE:
@@ -55,35 +58,26 @@ class NetworkInterface:
             
             # Initialize Ethernet interface
             print("Initializing Ethernet interface...")
-            self.eth = wiznet.WIZNET5K(spi, cs, reset)
+            self.eth = WIZNET5K(spi, cs, reset, is_dhcp=True)
             
             # Use DHCP for automatic IP configuration
             print("Requesting IP address via DHCP...")
-            self.eth.dhcp = True
             
-            # Wait for IP address
-            timeout = time.monotonic() + 10  # 10 second timeout
-            while not self.eth.dhcp and time.monotonic() < timeout:
-                time.sleep(0.1)
-                
-            if self.eth.dhcp:
-                print(f"IP Address: {self.eth.pretty_ip(self.eth.ip_address)}")
-                print(f"Subnet Mask: {self.eth.pretty_ip(self.eth.subnet_mask)}")
-                print(f"Gateway: {self.eth.pretty_ip(self.eth.gateway_ip)}")
-                print(f"DNS Server: {self.eth.pretty_ip(self.eth.dns_server)}")
-            else:
-                print("DHCP failed, using default IP address")
-                # Set a default IP configuration
-                self.eth.ifconfig = (
-                    (192, 168, 1, 100),  # IP address
-                    (255, 255, 255, 0),  # Subnet mask
-                    (192, 168, 1, 1),    # Gateway
-                    (8, 8, 8, 8)         # DNS server
-                )
+            # Wait a moment for DHCP to complete
+            time.sleep(0.5)
+            
+            # Display network information
+            print(f"IP Address: {self.eth.pretty_ip(self.eth.ip_address)}")
+            print(f"Subnet Mask: {self.eth.pretty_ip(self.eth.subnet_mask)}")
+            print(f"Gateway: {self.eth.pretty_ip(self.eth.gateway_ip)}")
+            print(f"DNS Server: {self.eth.pretty_ip(self.eth.dns_server)}")
                 
             # Create socket server
             print(f"Starting TCP server on port {port}...")
-            self.server_socket = socket(self.eth)
+            # Create a socket pool
+            self.pool = socketpool.SocketPool(self.eth)
+            self.server_socket = self.pool.socket()
+            self.server_socket.settimeout(0.5)  # Half-second timeout
             self.server_socket.bind((0, port))
             self.server_socket.listen(1)
             
@@ -91,14 +85,18 @@ class NetworkInterface:
         except Exception as e:
             print(f"Error initializing network interface: {e}")
             print("Network interface in fallback mode (no hardware)")
+            # Reset attributes for fallback mode
+            self.eth = None
+            self.pool = None
+            self.server_socket = None
         
     def update(self):
         """
         Handle network connections and incoming commands
         Should be called in the main loop
         """
-        # Skip if Ethernet not available
-        if not ETHERNET_AVAILABLE:
+        # Skip if Ethernet not available or socket not initialized
+        if not ETHERNET_AVAILABLE or self.server_socket is None:
             return
             
         try:
@@ -110,14 +108,16 @@ class NetworkInterface:
                     print(f"Network client connected from {ip_str}:{addr[1]}")
                     self.send_message("THOR SiC Heater Control System - Data Logging Interface")
                     self.send_message(self.csv_header)
-                except OSError:
-                    pass  # No connection available
+                except (OSError, TimeoutError):
+                    pass  # No connection available or timeout
                     
             # Process read-only monitoring commands if client is connected
             if self.client:
                 try:
-                    if self.client.available():
-                        # Handle incoming data
+                    # Check for data to read
+                    try:
+                        # Handle incoming data (with timeout)
+                        self.client.settimeout(0.01)  # Very short timeout
                         data = self.client.recv(256)
                         if data:
                             try:
@@ -147,7 +147,10 @@ class NetworkInterface:
                             except UnicodeError:
                                 # Clear buffer on decode error
                                 self.client_buffer = ""
-                except OSError as e:
+                    except (OSError, TimeoutError):
+                        # No data available or timeout
+                        pass
+                except Exception as e:
                     # Handle disconnection
                     print(f"Network client disconnected: {e}")
                     self.client = None
@@ -162,8 +165,8 @@ class NetworkInterface:
         Args:
             message: The message string to send
         """
-        # Skip if Ethernet not available
-        if not ETHERNET_AVAILABLE:
+        # Skip if Ethernet not available or if eth object is None
+        if not ETHERNET_AVAILABLE or self.eth is None:
             # Print to serial console instead
             print(f"LOG: {message}")
             return
@@ -186,8 +189,8 @@ class NetworkInterface:
         Args:
             message: The message string to send
         """
-        # Skip if Ethernet not available
-        if not ETHERNET_AVAILABLE:
+        # Skip if Ethernet not available or if eth object is None
+        if not ETHERNET_AVAILABLE or self.eth is None:
             return
             
         if self.client:
@@ -202,8 +205,8 @@ class NetworkInterface:
                 
     def close(self):
         """Close the interface and release resources"""
-        # Skip if Ethernet not available
-        if not ETHERNET_AVAILABLE:
+        # Skip if Ethernet not available or if eth object is None
+        if not ETHERNET_AVAILABLE or self.eth is None:
             return
             
         if self.client:
@@ -213,7 +216,8 @@ class NetworkInterface:
             except:
                 pass
                 
-        try:
-            self.server_socket.close()
-        except:
-            pass
+        if self.server_socket:
+            try:
+                self.server_socket.close()
+            except:
+                pass
