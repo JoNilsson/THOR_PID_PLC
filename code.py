@@ -1154,9 +1154,13 @@ while True:
             print(f"Heater: {temp_str} | Blower Outlet: {blower_temp_str} | Current: {curr_str} | Output: {output_str}")
             print(f"Network: {network_status} | Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
 
-            # Display any warnings (like current signal warnings)
+            # Display any warnings (like current signal warnings) 
+            # but only show them at most once every 10 seconds to avoid console flooding
             if safety_manager.current_warning:
-                print(f"WARNING: {safety_manager.current_warning}")
+                current_time_int = int(current_time)
+                if not hasattr(safety_manager, 'last_warning_time') or current_time_int % 10 == 0:
+                    safety_manager.last_warning_time = current_time_int
+                    print(f"WARNING: {safety_manager.current_warning}")
 
             # Display any blower warnings
             if safety_manager.blower_warning:
