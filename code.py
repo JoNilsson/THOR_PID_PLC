@@ -865,8 +865,8 @@ def read_current(safety_manager):
         # (connected to the current transformer module that outputs 4-20mA)
         raw_signal = current_module[2].value
         
-        # Debug raw values for easier diagnostics
-        print(f"DEBUG: Current raw signal value = {raw_signal} (of {MAX_COUNT} max)")
+        # Debug raw values only when debugging is enabled
+        # Uncomment for debugging: print(f"DEBUG: Current raw signal value = {raw_signal} (of {MAX_COUNT} max)")
 
         # Calculate the percentage of full scale (4mA = 0%, 20mA = 100%)
         # First convert raw value to mA
