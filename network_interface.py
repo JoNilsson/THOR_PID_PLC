@@ -58,13 +58,43 @@ class NetworkInterface:
             
             # Initialize Ethernet interface
             print("Initializing Ethernet interface...")
-            self.eth = WIZNET5K(spi, cs, reset, is_dhcp=True)
             
-            # Use DHCP for automatic IP configuration
-            print("Requesting IP address via DHCP...")
+            # Hardware reset of the WIZnet chip
+            reset.value = False
+            time.sleep(0.1)
+            reset.value = True
+            time.sleep(0.2)  # Give chip time to stabilize
             
-            # Wait a moment for DHCP to complete
-            time.sleep(0.5)
+            # Initialize with retry logic
+            retry_count = 3
+            while retry_count > 0:
+                try:
+                    self.eth = WIZNET5K(spi, cs, reset, is_dhcp=True)
+                    
+                    # Use DHCP for automatic IP configuration
+                    print("Requesting IP address via DHCP...")
+                    
+                    # Wait longer for DHCP to complete
+                    time.sleep(2.0)
+                    
+                    # Verify we got a valid IP
+                    if self.eth.ip_address[0] == 0:
+                        print("No IP address assigned, retrying DHCP...")
+                        time.sleep(1.0)
+                        self.eth.ifconfig = (None, None, None, None)  # Reset config
+                        continue
+                        
+                    # Successfully initialized
+                    break
+                    
+                except Exception as e:
+                    print(f"Ethernet init attempt failed: {e}")
+                    retry_count -= 1
+                    if retry_count > 0:
+                        print(f"Retrying... ({retry_count} attempts left)")
+                        time.sleep(1.0)
+                    else:
+                        raise  # Re-raise the exception after all retries fail
             
             # Display network information
             print(f"IP Address: {self.eth.pretty_ip(self.eth.ip_address)}")
