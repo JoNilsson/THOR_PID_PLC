@@ -34,9 +34,9 @@ import digitalio
 from blower_monitor import BlowerMonitor
 
 # Import serial control modules
-from command_processor import CommandProcessor
-from serial_interface import SerialInterface
-from network_interface import NetworkInterface
+import command_processor
+import serial_interface
+import network_interface
 
 # Configuration constants
 # Temperature setpoints
@@ -1015,12 +1015,12 @@ state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
 
 # Initialize interfaces for serial control and data logging
 # Command processor needs to be initialized first
-command_processor = CommandProcessor(state_machine, safety_manager, pid, scr_output)
+command_processor_obj = command_processor.CommandProcessor(state_machine, safety_manager, pid, scr_output)
 
 # Initialize RS-485 serial interface for control
 # Using P1AM-SERIAL shield on TX1/RX1 with DE on D13
-serial_interface = SerialInterface(
-    command_processor=command_processor,
+serial_interface_obj = serial_interface.SerialInterface(
+    command_processor=command_processor_obj,
     tx_pin=board.TX1,
     rx_pin=board.RX1,
     de_pin=board.D13,
@@ -1029,8 +1029,8 @@ serial_interface = SerialInterface(
 
 # Initialize TCP/IP network interface for data logging
 # Using P1AM-ETH shield with CS pin D4 and reset pin D5
-network_interface = NetworkInterface(
-    command_processor=command_processor,
+network_interface_obj = network_interface.NetworkInterface(
+    command_processor=command_processor_obj,
     cs_pin=board.D4,
     reset_pin=board.D5,
     port=23  # Standard telnet port
@@ -1074,17 +1074,17 @@ while True:
             state_machine.process_event(blower_event)
 
         # Update interfaces
-        serial_interface.update()
-        network_interface.update()
+        serial_interface_obj.update()
+        network_interface_obj.update()
         
         # Only update state machine if not in manual mode
-        if not command_processor.manual_mode:
+        if not command_processor_obj.manual_mode:
             # Update automatic control mode
             state_machine.update()
             led_manager.update()
         else:
             # In manual mode, update command processor for logging
-            command_processor.update()
+            command_processor_obj.update()
             
             # In manual mode, we still need to update LEDs
             # But use the manual mode LED pattern
@@ -1101,7 +1101,7 @@ while True:
             curr_str = f"{current_reading:.2f}A" if current_reading is not None else "ERROR"
 
             # Status strings
-            if command_processor.manual_mode:
+            if command_processor_obj.manual_mode:
                 state_str = "MANUAL_CONTROL"
             else:
                 state_str = SystemState.NAMES[state_machine.current_state]
@@ -1142,9 +1142,9 @@ while True:
         safety_manager.set_error(999, f"Unhandled exception: {e}")
         
         # In manual mode, reset to minimal output and exit manual mode
-        if command_processor.manual_mode:
+        if command_processor_obj.manual_mode:
             scr_output.real = 4.0
-            command_processor.manual_mode = False
+            command_processor_obj.manual_mode = False
         # Otherwise transition to error state
         else:
             state_machine.transition_to(SystemState.ERROR)
