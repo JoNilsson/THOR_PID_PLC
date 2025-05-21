@@ -1135,10 +1135,19 @@ while True:
 
             # Blower status
             blower_status = "RUNNING" if blower_monitor.blower_status else "OFF"
+            
+            # Network status - get IP address if available
+            network_status = "DISABLED"
+            if hasattr(network_interface_obj, 'eth') and network_interface_obj.eth is not None:
+                try:
+                    ip_address = network_interface_obj.eth.pretty_ip(network_interface_obj.eth.ip_address)
+                    network_status = f"ONLINE @ {ip_address}:23"
+                except:
+                    network_status = "ERROR"
 
             print(f"State: {state_str} | E-STOP: {estop_status} | Blower: {blower_status}")
             print(f"Heater: {temp_str} | Blower Outlet: {blower_temp_str} | Current: {curr_str} | Output: {output_str}")
-            print(f"Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
+            print(f"Network: {network_status} | Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
 
             # Display any warnings (like current signal warnings)
             if safety_manager.current_warning:
