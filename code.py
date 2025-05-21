@@ -832,7 +832,7 @@ class StateMachine:
 
         return False
 
-# Function to read temperature safely
+# Function to read heater temperature safely
 def read_temperature(safety_manager):
     try:
         # Read primary temperature (Slot 1, Channel 1)
@@ -842,6 +842,20 @@ def read_temperature(safety_manager):
         return temp
     except Exception as e:
         safety_manager.set_error(1, f"Temperature reading error: {e}")
+        return None
+
+# Function to read blower outlet temperature safely
+def read_blower_temperature():
+    try:
+        # Read blower outlet temperature (Slot 1, Channel 2)
+        temp = thm_module[2].value
+        if temp is None or temp < 0 or temp > 2000:  # Sanity check
+            print(f"WARNING: Invalid blower temperature reading")
+            return None
+        return temp
+    except Exception as e:
+        # Just log warning, don't trigger a system error since this is for monitoring only
+        print(f"WARNING: Blower temperature reading error: {e}")
         return None
 
 # Function to read current safely using the 4-20mA current module
