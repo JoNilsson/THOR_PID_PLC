@@ -7,7 +7,9 @@ flowchart TD
     classDef fullpowerState fill:#ABEBC6,stroke:#000000
     classDef errorState fill:#FF90A1,stroke:#000000
     classDef shutdownState fill:#D7BDE2,stroke:#000000
+    classDef manualState fill:#F8C471,stroke:#000000
     classDef decisionPoint fill:#D2B4DE,stroke:#000000,shape:diamond
+    classDef interfaceNode fill:#A9CCE3,stroke:#000000,shape:hexagon
 
     %% Define main nodes
     IDLE[IDLE]:::idleState
@@ -19,6 +21,12 @@ flowchart TD
     FULL_TEMP_STEADY["TARGET TEMP REACHED<br>Blue Light Steady"]:::fullpowerState
     ERROR["ERROR<br>Red Light Flashing"]:::errorState
     SHUTDOWN["SHUTDOWN<br>Graceful Ramp-Down"]:::shutdownState
+    MANUAL_CONTROL["MANUAL CONTROL<br>Amber/Blue Alternating"]:::manualState
+
+    %% Interface nodes
+    NETWORK_LOGGER["TCP/IP Network<br>Data Logging"]:::interfaceNode
+    SERIAL_CONTROL["RS-485 Serial<br>Control Interface"]:::interfaceNode
+    TEMPERATURE_MONITORING["Dual Temperature<br>Monitoring"]:::interfaceNode
     
     %% Decision diamonds
     InitializeBtn[/"INITIALIZE Button (GREEN)"/]:::decisionPoint
@@ -27,6 +35,8 @@ flowchart TD
     WarmUpComplete[/"Warm-Up Complete?"/]:::decisionPoint
     TargetTempReached[/"Target Temp Reached?"/]:::decisionPoint
     ESTOP[/"E-STOP Button (RED)"/]:::decisionPoint
+    BlowerStatus[/"Blower Status"/]:::decisionPoint
+    ManualCtrl[/"Manual Control<br>Command"/]:::decisionPoint
     
     %% Define main flow
     IDLE --> InitializeBtn
@@ -38,7 +48,9 @@ flowchart TD
     SelfCheckResult -- "No" --> ERROR
     
     %% Start button after self-check
-    StartBtn -- "Pressed" --> WARM_UP_FLASH
+    StartBtn -- "Pressed" --> BlowerStatus
+    BlowerStatus -- "Running" --> WARM_UP_FLASH
+    BlowerStatus -- "Off" --> ERROR
     
     %% Warm-up flow
     WARM_UP_FLASH --> WarmUpComplete
@@ -68,22 +80,61 @@ flowchart TD
     SHUTDOWN --> ESTOP
     ESTOP -- "Pressed" --> ERROR
     
+    %% RS-485 Serial Control connections
+    SERIAL_CONTROL --> ManualCtrl
+    ManualCtrl -- "C:MANUAL_MODE" --> MANUAL_CONTROL
+    MANUAL_CONTROL -- "C:AUTO_MODE" --> IDLE
+    MANUAL_CONTROL --> ESTOP
+    
+    %% Serial control to automatic mode
+    SERIAL_CONTROL -- "C:INIT" --> SELF_CHECK
+    SERIAL_CONTROL -- "C:START" --> WARM_UP_FLASH
+    SERIAL_CONTROL -- "C:STOP" --> SHUTDOWN
+    
+    %% Manual SCR control
+    MANUAL_CONTROL -- "S:OUTPUT=x.x" --> MANUAL_CONTROL
+    MANUAL_CONTROL -- "S:OUTPUT_INCREMENT=x.x" --> MANUAL_CONTROL
+    
+    %% Data logging flows
+    TEMPERATURE_MONITORING -- "Heater Temp" --> NETWORK_LOGGER
+    TEMPERATURE_MONITORING -- "Blower Outlet Temp" --> NETWORK_LOGGER
+    IDLE --> NETWORK_LOGGER
+    SELF_CHECK --> NETWORK_LOGGER
+    SYSTEM_ARMED --> NETWORK_LOGGER
+    WARM_UP_FLASH --> NETWORK_LOGGER
+    WARM_UP_STEADY --> NETWORK_LOGGER
+    FULL_TEMP_FLASH --> NETWORK_LOGGER
+    FULL_TEMP_STEADY --> NETWORK_LOGGER
+    ERROR --> NETWORK_LOGGER
+    SHUTDOWN --> NETWORK_LOGGER
+    MANUAL_CONTROL --> NETWORK_LOGGER
+    
     %% Title with increased font size
-    MainTitle["THOR PLC Temperature Control System Logic Flowchart"]
+    MainTitle["THOR SiC Heater Control System Logic Flowchart (v1.4.1)"]
     style MainTitle font-size:24px,fill:none,stroke:none
     MainTitle --> IDLE
     
     %% Legend subgraph
-    subgraph Legend ["Legend"]
+    subgraph Legend ["State Legend"]
         direction LR
         L_Idle["Idle State"]:::idleState
         L_Check["Self Check State"]:::checkState
         L_Armed["System Armed State"]:::armedState
         L_Warmup["Warm-Up State"]:::warmupState
         L_FullPower["Full-Power State"]:::fullpowerState
+        L_Manual["Manual Control"]:::manualState
         L_Error["Error State"]:::errorState
         L_Shutdown["Shutdown State"]:::shutdownState
         L_Decision[/"Decision Point"/]:::decisionPoint
+        L_Interface["Interface"]:::interfaceNode
+    end
+    
+    %% Control interfaces legend
+    subgraph Interfaces ["Control Interfaces"]
+        direction LR
+        I_Button["Physical Buttons<br>On-site Control"]:::decisionPoint
+        I_Serial["RS-485 Serial<br>Remote Control"]:::interfaceNode
+        I_Network["TCP/IP Network<br>Data Logging"]:::interfaceNode
     end
     
     %% Button Legend 
@@ -93,4 +144,3 @@ flowchart TD
         B_INIT["INITIALIZE (GREEN)<br>System Arming"]:::fullpowerState
         B_START["START (AMBER)<br>Multi-function Control"]:::warmupState
     end
-
