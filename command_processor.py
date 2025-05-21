@@ -95,6 +95,11 @@ class CommandProcessor:
                 temp = read_temperature(self.safety_manager)
                 return f"TEMP:{temp:.1f}" if temp is not None else "ERROR:Temp read failed"
                 
+            elif cmd == "BLOWER_TEMP":
+                from code import read_blower_temperature
+                blower_temp = read_blower_temperature()
+                return f"BLOWER_TEMP:{blower_temp:.1f}" if blower_temp is not None else "INFO:Blower temp not available"
+                
             elif cmd == "STATE":
                 if self.manual_mode:
                     return "STATE:MANUAL_CONTROL"
@@ -178,17 +183,19 @@ class CommandProcessor:
             message: The action message to log
         """
         # Import these locally to avoid circular imports
-        from code import read_temperature, read_current
+        from code import read_temperature, read_current, read_blower_temperature
         
         if self.network_interface:
             temp = read_temperature(self.safety_manager)
+            blower_temp = read_blower_temperature()
             current = read_current(self.safety_manager)
             temp_str = f"{temp:.1f}" if temp is not None else "ERROR"
+            blower_temp_str = f"{blower_temp:.1f}" if blower_temp is not None else "UNKNOWN"
             curr_str = f"{current:.2f}" if current is not None else "ERROR"
             
             # Create CSV formatted log entry
             timestamp = time.monotonic()
-            log_message = f"{timestamp:.1f},MANUAL_CONTROL,{message},{temp_str},{curr_str},{self.scr_output.real:.2f}"
+            log_message = f"{timestamp:.1f},MANUAL_CONTROL,{message},{temp_str},{blower_temp_str},{curr_str},{self.scr_output.real:.2f}"
             self.network_interface.log_message(log_message)
             
     def update(self):
@@ -197,7 +204,7 @@ class CommandProcessor:
         Should be called in the main loop
         """
         # Import these locally to avoid circular imports
-        from code import read_temperature, read_current, blower_monitor
+        from code import read_temperature, read_current, read_blower_temperature, blower_monitor
         
         if self.manual_mode and self.network_interface:
             current_time = time.monotonic()
@@ -208,15 +215,17 @@ class CommandProcessor:
                 
                 # Get sensor readings
                 temp = read_temperature(self.safety_manager)
+                blower_temp = read_blower_temperature()
                 current = read_current(self.safety_manager)
                 blower_status = "RUNNING" if blower_monitor.blower_status else "OFF"
                 
                 # Format values for logging
                 temp_str = f"{temp:.1f}" if temp is not None else "ERROR"
+                blower_temp_str = f"{blower_temp:.1f}" if blower_temp is not None else "UNKNOWN"
                 curr_str = f"{current:.2f}" if current is not None else "ERROR"
                 
                 # Create CSV formatted log entry
-                log_entry = f"{current_time:.1f},MANUAL_CONTROL,{temp_str},{curr_str},{self.scr_output.real:.2f},{blower_status}"
+                log_entry = f"{current_time:.1f},MANUAL_CONTROL,{temp_str},{blower_temp_str},{curr_str},{self.scr_output.real:.2f},{blower_status}"
                 self.network_interface.log_message(log_entry)
 
 # Make the class directly available at the module level
