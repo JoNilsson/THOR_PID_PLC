@@ -6,8 +6,8 @@ Supports both automatic PID control and manual control modes
 """
 
 import time
-from code import SystemState, Event, EventType, read_temperature, read_current
 
+# This class will be imported by code.py
 class CommandProcessor:
     def __init__(self, state_machine, safety_manager, pid_controller, scr_output):
         """
@@ -25,7 +25,7 @@ class CommandProcessor:
         self.scr_output = scr_output
         self.manual_mode = False
         self.network_interface = None  # Will be set after initialization
-        self.previous_state = SystemState.IDLE
+        self.previous_state = None
         self.last_log_time = 0
         self.log_interval = 1.0  # Log interval in seconds
         
@@ -49,6 +49,9 @@ class CommandProcessor:
             
         cmd_type = parts[0].upper()
         cmd = parts[1].upper()
+        
+        # Import these locally to avoid circular imports
+        from code import SystemState, Event, EventType, read_temperature, read_current
         
         # System control commands
         if cmd_type == "C":  # Control commands
@@ -146,6 +149,7 @@ class CommandProcessor:
         
     def _enter_manual_mode(self):
         """Enter manual control mode"""
+        from code import SystemState
         self.manual_mode = True
         # Save the current state to return to later
         self.previous_state = self.state_machine.current_state
@@ -156,6 +160,7 @@ class CommandProcessor:
         
     def _exit_manual_mode(self):
         """Exit manual control mode"""
+        from code import SystemState
         if self.manual_mode:
             self.manual_mode = False
             # Set minimum output before returning to automatic control
@@ -172,6 +177,9 @@ class CommandProcessor:
         Args:
             message: The action message to log
         """
+        # Import these locally to avoid circular imports
+        from code import read_temperature, read_current
+        
         if self.network_interface:
             temp = read_temperature(self.safety_manager)
             current = read_current(self.safety_manager)
@@ -188,6 +196,9 @@ class CommandProcessor:
         Periodic update for logging in manual mode
         Should be called in the main loop
         """
+        # Import these locally to avoid circular imports
+        from code import read_temperature, read_current, blower_monitor
+        
         if self.manual_mode and self.network_interface:
             current_time = time.monotonic()
             
@@ -198,7 +209,6 @@ class CommandProcessor:
                 # Get sensor readings
                 temp = read_temperature(self.safety_manager)
                 current = read_current(self.safety_manager)
-                from code import blower_monitor
                 blower_status = "RUNNING" if blower_monitor.blower_status else "OFF"
                 
                 # Format values for logging
@@ -208,3 +218,6 @@ class CommandProcessor:
                 # Create CSV formatted log entry
                 log_entry = f"{current_time:.1f},MANUAL_CONTROL,{temp_str},{curr_str},{self.scr_output.real:.2f},{blower_status}"
                 self.network_interface.log_message(log_entry)
+
+# Make the class directly available at the module level
+CommandProcessor = CommandProcessor

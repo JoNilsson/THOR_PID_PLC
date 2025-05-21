@@ -1059,7 +1059,7 @@ while True:
         current_time = time.monotonic()
         if current_time - startup_time > STARTUP_GUARD_TIME:
             # Check for and process button events - only when not in manual mode
-            if not command_processor.manual_mode:
+            if not command_processor_obj.manual_mode:
                 if initialize_button.get_event_and_clear():
                     print("INITIALIZE button pressed")
                     state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))

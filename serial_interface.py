@@ -22,29 +22,41 @@ class SerialInterface:
             baudrate: Communication baudrate (default 9600)
         """
         # Create UART object
-        uart = busio.UART(tx_pin, rx_pin, baudrate=baudrate, 
-                          bits=8, parity=None, stop=1, 
-                          timeout=0.1, receiver_buffer_size=256)
-        
-        # Initialize RS-485 wrapper
-        self.rs485 = RS485(uart, de_pin)
-        
-        # Store reference to command processor
-        self.command_processor = command_processor
-        
-        # Initialize command buffer
-        self.buffer = ""
-        
-        # Send welcome message
-        self.send_message("THOR SiC Heater Control System")
-        self.send_message("RS-485 Control Interface Ready")
-        print(f"RS-485 serial interface initialized at {baudrate} baud")
+        try:
+            uart = busio.UART(tx_pin, rx_pin, baudrate=baudrate, 
+                             bits=8, parity=None, stop=1, 
+                             timeout=0.1, receiver_buffer_size=256)
+            
+            # Initialize RS-485 wrapper
+            self.rs485 = RS485(uart, de_pin)
+            
+            # Store reference to command processor
+            self.command_processor = command_processor
+            
+            # Initialize command buffer
+            self.buffer = ""
+            
+            # Send welcome message
+            self.send_message("THOR SiC Heater Control System")
+            self.send_message("RS-485 Control Interface Ready")
+            print(f"RS-485 serial interface initialized at {baudrate} baud")
+        except Exception as e:
+            print(f"Error initializing serial interface: {e}")
+            print("Serial interface in fallback mode (no hardware)")
+            # Create dummy objects for graceful failure
+            self.rs485 = None
+            self.command_processor = command_processor
+            self.buffer = ""
         
     def update(self):
         """
         Check for incoming commands and process them
         Should be called in the main loop
         """
+        # Skip if serial interface failed to initialize
+        if self.rs485 is None:
+            return
+            
         # Check if data is available
         if self.rs485.in_waiting:
             # Read available data
@@ -83,6 +95,10 @@ class SerialInterface:
         Args:
             message: The message string to send
         """
+        # Skip if serial interface failed to initialize
+        if self.rs485 is None:
+            return
+            
         try:
             # Add CR+LF and encode
             full_message = message + '\r\n'
@@ -92,6 +108,10 @@ class SerialInterface:
             
     def close(self):
         """Close the interface and release resources"""
+        # Skip if serial interface failed to initialize
+        if self.rs485 is None:
+            return
+            
         try:
             # Send goodbye message
             self.send_message("RS-485 interface closing")
@@ -99,3 +119,6 @@ class SerialInterface:
             # but we can reset the UART if needed
         except:
             pass
+
+# Make the class directly available at module level
+SerialInterface = SerialInterface
