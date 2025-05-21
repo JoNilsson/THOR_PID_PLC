@@ -40,6 +40,7 @@ For a detailed visual representation of the control system operation, see the [f
 - RS-485 serial control interface for remote operation
 - TCP/IP network interface for data logging and monitoring
 - Manual control mode for direct SCR output manipulation
+- Dual temperature monitoring (heater core and blower outlet) for efficiency tracking
 
 ## Implementation Details
 
@@ -119,7 +120,14 @@ For detailed information about state machine problems and solutions, see [state_
 
 ## Changelog
 
-### v1.4.0 (Current)
+### v1.4.1 (Current)
+
+- Added blower outlet temperature monitoring using second thermocouple
+- Enhanced data logging to include efficiency tracking
+- Added G:BLOWER_TEMP command to query blower outlet temperature
+- Improved console status display with separate temperature readings
+
+### v1.4.0
 
 - Added RS-485 serial control interface
 - Implemented TCP/IP network interface for data logging
@@ -207,7 +215,8 @@ The system can be controlled remotely using the RS-485 interface. Here's how to 
      - `C:STOP` - Stop heating and begin shutdown
    
    - **Get Commands (G:)**:
-     - `G:TEMP` - Read current temperature
+     - `G:TEMP` - Read current heater temperature
+     - `G:BLOWER_TEMP` - Read blower outlet temperature
      - `G:STATE` - Get current system state
      - `G:CURRENT` - Read heater current
      - `G:OUTPUT` - Read SCR output (4-20mA)
@@ -257,9 +266,10 @@ The system provides data logging and read-only monitoring via Ethernet. Here's h
    - Data will begin streaming automatically in CSV format
 
 3. **Data Format**:
-   - CSV format with header: `timestamp,state,temperature,current,output,blower_status`
-   - Example: `1234.5,WARM_UP,125.3,45.67,12.50,RUNNING`
+   - CSV format with header: `timestamp,state,temperature,blower_temp,current,output,blower_status`
+   - Example: `1234.5,WARM_UP,125.3,105.2,45.67,12.50,RUNNING`
    - Data updated at approximately 1-second intervals
+   - `blower_temp` field shows the temperature at the blower outlet (air output)
 
 4. **Available Commands**:
    - The network interface accepts read-only commands (G: prefix only)
