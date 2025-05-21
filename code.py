@@ -20,6 +20,11 @@ Hardware Configuration:
 - Slot 5: P1-15CDD1 for button inputs
 
 Written for controlling a Dwyer-Omega SCR39-48-080-S9
+
+Added Features (May 2025):
+- RS-485 Serial control interface
+- TCP/IP Network monitoring and data logging
+- Manual control mode for direct SCR output manipulation
 """
 
 import time
@@ -27,6 +32,11 @@ import P1AM
 import board
 import digitalio
 from blower_monitor import BlowerMonitor
+
+# Import serial control modules
+from command_processor import CommandProcessor
+from serial_interface import SerialInterface
+from network_interface import NetworkInterface
 
 # Configuration constants
 # Temperature setpoints
@@ -341,6 +351,21 @@ class LEDManager:
                     self.active_patterns[led] = "FAST_BLINK"
 
         print(f"Updated LED patterns for state: {SystemState.NAMES[system_state]}")
+        
+    def set_manual_mode_indication(self):
+        """Configure LED patterns for manual control mode"""
+        # Reset all patterns first
+        for led in ["green", "amber", "blue", "red"]:
+            self.active_patterns[led] = "OFF"
+            
+        # Manual mode uses alternating amber/blue pattern
+        self.active_patterns["amber"] = "SLOW_BLINK"
+        self.active_patterns["blue"] = "SLOW_BLINK"
+        
+        # Offset the timers to make them alternate
+        self.pattern_timers["blue"] = time.monotonic() - (BLINK_INTERVAL_SLOW / 2)
+        
+        print("Updated LED patterns for MANUAL CONTROL mode")
 
     def update(self):
         """Update all LED states based on their current patterns"""
@@ -988,6 +1013,29 @@ blower_monitor = BlowerMonitor(
 led_manager = LEDManager(green_light, amber_light, blue_light, red_light)
 state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
 
+# Initialize interfaces for serial control and data logging
+# Command processor needs to be initialized first
+command_processor = CommandProcessor(state_machine, safety_manager, pid, scr_output)
+
+# Initialize RS-485 serial interface for control
+# Using P1AM-SERIAL shield on TX1/RX1 with DE on D13
+serial_interface = SerialInterface(
+    command_processor=command_processor,
+    tx_pin=board.TX1,
+    rx_pin=board.RX1,
+    de_pin=board.D13,
+    baudrate=9600
+)
+
+# Initialize TCP/IP network interface for data logging
+# Using P1AM-ETH shield with CS pin D4 and reset pin D5
+network_interface = NetworkInterface(
+    command_processor=command_processor,
+    cs_pin=board.D4,
+    reset_pin=board.D5,
+    port=23  # Standard telnet port
+)
+
 # Status reporting variables
 last_print_time = 0
 print_interval = 1.0  # Status print interval in seconds
@@ -995,53 +1043,70 @@ print_interval = 1.0  # Status print interval in seconds
 # Startup time for guard period
 startup_time = time.monotonic()
 
-print("System initialized.")
+print("System initialized")
 print("Beginning control loop...")
 print("Press INITIALIZE button (green) to begin")
+print("Serial and network interfaces active")
 
 # Main control loop
 while True:
     try:
-        # Update button states
+        # Update button states (E-STOP is always monitored regardless of mode)
         initialize_state = initialize_button.update()
         start_state = start_button.update()
 
         # Apply startup guard time - don't process button events during startup
         current_time = time.monotonic()
         if current_time - startup_time > STARTUP_GUARD_TIME:
-            # Check for and process button events
-            if initialize_button.get_event_and_clear():
-                print("INITIALIZE button pressed")
-                state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))
+            # Check for and process button events - only when not in manual mode
+            if not command_processor.manual_mode:
+                if initialize_button.get_event_and_clear():
+                    print("INITIALIZE button pressed")
+                    state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))
 
-            if start_button.get_event_and_clear():
-                print("START button pressed")
-                state_machine.process_event(Event(EventType.BUTTON_PRESSED, "START"))
+                if start_button.get_event_and_clear():
+                    print("START button pressed")
+                    state_machine.process_event(Event(EventType.BUTTON_PRESSED, "START"))
 
-        # Check blower status
+        # Check blower status - keep safety features operational in all modes
         is_blower_safe, blower_event = blower_monitor.check_blower(state_machine.current_state)
         if not is_blower_safe and blower_event:
             state_machine.process_event(blower_event)
 
-        # Update state machine
-        state_machine.update()
-
-        # Update LED manager
-        led_manager.update()
+        # Update interfaces
+        serial_interface.update()
+        network_interface.update()
+        
+        # Only update state machine if not in manual mode
+        if not command_processor.manual_mode:
+            # Update automatic control mode
+            state_machine.update()
+            led_manager.update()
+        else:
+            # In manual mode, update command processor for logging
+            command_processor.update()
+            
+            # In manual mode, we still need to update LEDs
+            # But use the manual mode LED pattern
+            led_manager.update()
 
         # Read sensors for status reporting
         current_temp = read_temperature(safety_manager)
         current_reading = read_current(safety_manager)
 
-        # Print status periodically
+        # Print status periodically - in both modes
         if current_time - last_print_time >= print_interval:
             # Format temperature and current readings
             temp_str = f"{current_temp:.1f}°F" if current_temp is not None else "ERROR"
             curr_str = f"{current_reading:.2f}A" if current_reading is not None else "ERROR"
 
             # Status strings
-            state_str = SystemState.NAMES[state_machine.current_state]
-            output_str = f"{scr_output.real:.2f}mA" if state_machine.current_state not in [SystemState.IDLE, SystemState.ERROR] else "OFF"
+            if command_processor.manual_mode:
+                state_str = "MANUAL_CONTROL"
+            else:
+                state_str = SystemState.NAMES[state_machine.current_state]
+                
+            output_str = f"{scr_output.real:.2f}mA"
 
             # LED status
             green_status = "ON" if green_light.value else "OFF"
@@ -1073,9 +1138,17 @@ while True:
             last_print_time = current_time
 
     except Exception as e:
-        # Unexpected error
+        # Unexpected error - ensure safety
         safety_manager.set_error(999, f"Unhandled exception: {e}")
-        state_machine.transition_to(SystemState.ERROR)
+        
+        # In manual mode, reset to minimal output and exit manual mode
+        if command_processor.manual_mode:
+            scr_output.real = 4.0
+            command_processor.manual_mode = False
+        # Otherwise transition to error state
+        else:
+            state_machine.transition_to(SystemState.ERROR)
+            
         # Reset outputs to safe state
         scr_output.real = 4.0  # Minimum control signal
 
