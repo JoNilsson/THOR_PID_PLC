@@ -1106,12 +1106,14 @@ while True:
 
         # Read sensors for status reporting
         current_temp = read_temperature(safety_manager)
+        blower_temp = read_blower_temperature()
         current_reading = read_current(safety_manager)
 
         # Print status periodically - in both modes
         if current_time - last_print_time >= print_interval:
             # Format temperature and current readings
             temp_str = f"{current_temp:.1f}°F" if current_temp is not None else "ERROR"
+            blower_temp_str = f"{blower_temp:.1f}°F" if blower_temp is not None else "N/A"
             curr_str = f"{current_reading:.2f}A" if current_reading is not None else "ERROR"
 
             # Status strings
@@ -1134,7 +1136,8 @@ while True:
             # Blower status
             blower_status = "RUNNING" if blower_monitor.blower_status else "OFF"
 
-            print(f"State: {state_str} | E-STOP: {estop_status} | Blower: {blower_status} | Temp: {temp_str} | Current: {curr_str} | Output: {output_str}")
+            print(f"State: {state_str} | E-STOP: {estop_status} | Blower: {blower_status}")
+            print(f"Heater: {temp_str} | Blower Outlet: {blower_temp_str} | Current: {curr_str} | Output: {output_str}")
             print(f"Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
 
             # Display any warnings (like current signal warnings)
