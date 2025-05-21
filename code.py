@@ -864,6 +864,9 @@ def read_current(safety_manager):
         # Read the 4-20mA signal from Channel 2 of the P1-04AD module
         # (connected to the current transformer module that outputs 4-20mA)
         raw_signal = current_module[2].value
+        
+        # Debug raw values for easier diagnostics
+        print(f"DEBUG: Current raw signal value = {raw_signal} (of {MAX_COUNT} max)")
 
         # Calculate the percentage of full scale (4mA = 0%, 20mA = 100%)
         # First convert raw value to mA
@@ -875,7 +878,9 @@ def read_current(safety_manager):
         # Check for signal integrity issues (signal outside 4-20mA range)
         if signal_ma < 3.8:  # Allow for slight measurement error
             # For open circuit, just set a warning message instead of an error
-            safety_manager.current_warning = f"Low current signal: {signal_ma:.2f}mA - possible open circuit"
+            # Add additional diagnostic info
+            resistance = "∞ (open)" if signal_ma < 0.1 else f"{int(24.0/signal_ma*1000)} ohms"
+            safety_manager.current_warning = f"Low current signal: {signal_ma:.2f}mA - possible open circuit - Check CH2 wiring, est. loop resistance: {resistance}"
             # Return 0 current when signal is below 4mA range
             return 0.0
         elif signal_ma > 20.2:  # Allow for slight measurement error
