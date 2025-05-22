@@ -8,7 +8,7 @@ This project implements a robust industrial temperature control system for Terra
 
 The control system employs manual controls as well as an optimized, automated modular state machine architecture to manage the heating process through well-defined operational states from warm-up to full temperature operation, with comprehensive safety features and visual status indicators.
 
-For a detailed visual representation of the control system operation, see the [flowchart](flowchart.md) and [state machine diagram](plc_operation_flowchart.mmd).
+For a detailed visual representation of the control system operation, see the [flowchart](Docs/flowchart.md) and [state machine diagram](Docs/plc_operation_flowchart.mmd).
 
 ## Hardware Configuration
 
@@ -68,10 +68,11 @@ The control system uses a modular design with clear separation of concerns:
 - **Hardware Interfaces**: RS-485 serial (`serial_interface.py`) and TCP/IP network (`network_interface.py`)
 
 For detailed technical documentation, see:
-- [Serial Control Interface](serial-control.md) - RS-485 and TCP/IP communication protocols
-- [Blower Monitor System](blower-lockout-circuit.md) - Airflow verification and safety lockout
-- [Current Monitoring System](current_monitoring_changes.md) - Electrical current measurement and protection
-- [State Machine Architecture](state_machine_issues.md) - Control states and transition logic
+
+- [Serial Control Interface](Docs/serial-control.md) - RS-485 and TCP/IP communication protocols
+- [Blower Monitor System](Docs/blower-lockout-circuit.md) - Airflow verification and safety lockout
+- [Current Monitoring System](Docs/current_monitoring.md) - Electrical current measurement and protection
+- [State Machine Architecture](Docs/state_machine.md) - Control states and transition logic
 
 ## Requirements
 
