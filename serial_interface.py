@@ -33,6 +33,12 @@ class SerialInterface:
             
         # Create UART object
         try:
+            # Set mode pin LOW for RS-485 mode
+            print(f"Setting RS-485 mode pin {config.SERIAL_MODE_PIN} to LOW...")
+            mode_pin_obj = config.reserve_pin(config.SERIAL_MODE_PIN, "RS-485 Mode")
+            mode_pin = digitalio.DigitalInOut(mode_pin_obj)
+            mode_pin.switch_to_output(value=False)  # LOW = RS-485 mode
+            
             # Get the DE pin from config
             print(f"Requesting RS-485 DE pin {config.SERIAL_DE_PIN}...")
             de_pin_obj = config.reserve_pin(config.SERIAL_DE_PIN, "RS-485 DE")

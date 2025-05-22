@@ -68,14 +68,32 @@ class RS485:
             Number of bytes written
         """
         # Set DE pin high (transmit mode)
+        print(f"RS-485: Setting DE pin HIGH for TX")
         self.de_pin.value = True
         
         # Longer delay to ensure DE pin has time to switch
-        time.sleep(0.005)  # Increased from 0.001 to 0.005
+        time.sleep(0.010)  # Increased to 10ms for debugging
+        
+        # Verify DE pin is actually high
+        de_state = self.de_pin.value
+        print(f"RS-485: DE pin is {'HIGH' if de_state else 'LOW'} (should be HIGH)")
         
         # Write data
         bytes_written = self.uart.write(data)
         print(f"RS-485 TX: {data} ({bytes_written} bytes)")
+        
+        # Force UART to flush output buffer
+        # CircuitPython doesn't have flush() but we can try reset_output_buffer
+        try:
+            # Some CircuitPython versions might have this
+            if hasattr(self.uart, 'reset_output_buffer'):
+                self.uart.reset_output_buffer()
+        except:
+            pass
+            
+        # Wait for UART to actually transmit
+        # CircuitPython's UART might buffer, so we need to ensure it's sent
+        time.sleep(0.010)  # Wait 10ms
         
         # Allow more time for transmission to complete based on data length and baud rate
         # Calculate delay based on bytes and baud rate (assuming 10 bits per byte with start/stop)
@@ -83,14 +101,15 @@ class RS485:
         seconds_per_bit = 1.0 / self.uart.baudrate
         transmission_time = bits_to_send * seconds_per_bit
         
-        # Add a safety margin (at least 5ms, or double the calculated time)
-        delay = max(0.005, transmission_time * 2)
+        # Add a safety margin (at least 10ms, or double the calculated time)
+        delay = max(0.010, transmission_time * 2)
         time.sleep(delay)
         
         # Clear input buffer
         self.uart.reset_input_buffer()
         
         # Set DE pin back to low (receive mode)
+        print(f"RS-485: Setting DE pin LOW for RX")
         self.de_pin.value = False
         
         return bytes_written
