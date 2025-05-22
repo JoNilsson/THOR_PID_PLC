@@ -217,6 +217,11 @@ class SerialInterface:
                         print(f"Processing delayed unterminated command: '{self.buffer}'")
                         self._process_command_line(self.buffer)
                         self.buffer = ""
+            
+            # Check for stale partial commands (timeout after 2 seconds)
+            if self.buffer and (time.monotonic() - self.last_data_time) > 2.0:
+                print(f"RS-485 timeout, clearing stale buffer: '{self.buffer}'")
+                self.buffer = ""
                         
         except Exception as e:
             # Catch-all error handler to prevent serial processing from crashing the system
