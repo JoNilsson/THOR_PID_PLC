@@ -85,6 +85,7 @@ class SerialInterface:
             
             # Initialize command buffer
             self.buffer = ""
+            self.last_data_time = time.monotonic()
             
             # Send welcome message
             self.send_message("THOR SiC Heater Control System")
@@ -97,6 +98,7 @@ class SerialInterface:
             self.rs485 = None
             self.command_processor = command_processor
             self.buffer = ""
+            self.last_data_time = time.monotonic()
         
     def update(self):
         """
@@ -119,6 +121,9 @@ class SerialInterface:
                         # Decode and add to buffer
                         text = data.decode('utf-8')
                         print(f"RS-485 decoded: '{text}'")
+                        
+                        # Update last data time
+                        self.last_data_time = time.monotonic()
                         
                         # Limit buffer size to prevent memory issues
                         if len(self.buffer) + len(text) > 128:  # Reduced from 256 to 128
@@ -168,8 +173,11 @@ class SerialInterface:
                             # Check if command type is valid and we have a command
                             if cmd_type in ['C', 'G', 'S'] and len(parts) >= 2:
                                 # Check if command appears complete based on format
-                                if cmd_type == 'S' and 'OUTPUT=' in self.buffer:
-                                    command_complete = True
+                                if cmd_type == 'S' and '=' in self.buffer:
+                                    # For SET commands, make sure we have a value after the =
+                                    equal_pos = self.buffer.find('=')
+                                    if equal_pos < len(self.buffer) - 1:  # There's at least one char after =
+                                        command_complete = True
                                 elif cmd_type == 'G' and any(cmd in parts[1].upper() for cmd in ['TEMP', 'STATE', 'CURRENT', 'OUTPUT', 'PID']):
                                     command_complete = True
                                 elif cmd_type == 'C' and any(cmd in parts[1].upper() for cmd in ['INIT', 'START', 'MANUAL_MODE', 'AUTO_MODE', 'STOP']):
@@ -194,10 +202,13 @@ class SerialInterface:
                 
                 if cmd_type in ['C', 'G', 'S']:
                     # If we have a command type, check if we can process it
-                    if cmd_type == 'S' and 'OUTPUT=' in self.buffer:
-                        print(f"Processing delayed unterminated command: '{self.buffer}'")
-                        self._process_command_line(self.buffer)
-                        self.buffer = ""
+                    if cmd_type == 'S' and '=' in self.buffer:
+                        # For SET commands, make sure we have a value after the =
+                        equal_pos = self.buffer.find('=')
+                        if equal_pos < len(self.buffer) - 1:  # There's at least one char after =
+                            print(f"Processing delayed unterminated command: '{self.buffer}'")
+                            self._process_command_line(self.buffer)
+                            self.buffer = ""
                     elif cmd_type == 'G' and len(parts) >= 2:
                         print(f"Processing delayed unterminated command: '{self.buffer}'")
                         self._process_command_line(self.buffer)
