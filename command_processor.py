@@ -228,7 +228,13 @@ class CommandProcessor:
                 if self.manual_mode:
                     try:
                         # Extract the value part after the equals sign
-                        output_part = cmd.split("OUTPUT=")[1].strip()
+                        # For S:OUTPUT=5, we need to get the full command string
+                        if cmd == "OUTPUT=":
+                            # Get value from the original command
+                            output_part = command.split("OUTPUT=")[1].strip()
+                        else:
+                            # Legacy format support
+                            output_part = cmd.split("OUTPUT=")[1].strip()
                         output = float(output_part)
                         # Constrain to valid 4-20mA range
                         output = max(4.0, min(20.0, output))
