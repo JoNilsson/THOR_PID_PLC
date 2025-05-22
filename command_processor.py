@@ -231,7 +231,7 @@ class CommandProcessor:
                         # For S:OUTPUT=5, we need to get the full command string
                         if cmd == "OUTPUT=":
                             # Get value from the original command
-                            output_part = command.split("OUTPUT=")[1].strip()
+                            output_part = cmd_str.split("OUTPUT=")[1].strip()
                         else:
                             # Legacy format support
                             output_part = cmd.split("OUTPUT=")[1].strip()
@@ -254,7 +254,7 @@ class CommandProcessor:
                         # For S:OUTPUT_INCREMENT=1, we need to get the full command string
                         if cmd == "OUTPUT_INCREMENT=":
                             # Get value from the original command
-                            increment_part = command.split("OUTPUT_INCREMENT=")[1].strip()
+                            increment_part = cmd_str.split("OUTPUT_INCREMENT=")[1].strip()
                         else:
                             # Legacy format support
                             increment_part = cmd.split("OUTPUT_INCREMENT=")[1].strip()
