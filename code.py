@@ -1059,6 +1059,11 @@ state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
 # Command processor needs to be initialized first
 command_processor_obj = command_processor.CommandProcessor(state_machine, safety_manager, pid, scr_output)
 
+# Set references to avoid circular imports and memory allocation issues
+command_processor.CommandProcessor.set_code_references(
+    SystemState, Event, EventType, read_temperature, read_current, read_blower_temperature, blower_monitor
+)
+
 # Import configuration settings
 import config
 console.log_event("Initializing hardware interfaces (config-controlled)...", "INIT")
@@ -1156,6 +1161,14 @@ else:
 
 console.log_success("Initialization complete")
 
+# Check initial memory
+import gc
+gc.collect()
+initial_free = gc.mem_free()
+console.log_info(f"Initial free memory: {initial_free} bytes")
+last_mem_check = time.monotonic()
+mem_check_interval = 30.0  # Check every 30 seconds
+
 # Main control loop
 while True:
     try:
@@ -1202,6 +1215,15 @@ while True:
             # In manual mode, we still need to update LEDs
             # But use the manual mode LED pattern
             led_manager.update()
+        
+        # Periodic memory check
+        if current_time - last_mem_check >= mem_check_interval:
+            last_mem_check = current_time
+            gc.collect()
+            free_mem = gc.mem_free()
+            console.log_info(f"Free memory: {free_mem} bytes")
+            if free_mem < 5000:
+                console.log_warning(f"Low memory warning: {free_mem} bytes free")
 
         # Read sensors for status reporting
         current_temp = read_temperature(safety_manager)

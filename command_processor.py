@@ -6,6 +6,17 @@ Supports both automatic PID control and manual control modes
 """
 
 import time
+import gc
+
+# Note: We'll store references to these functions/classes after initialization
+# to avoid circular imports and repeated import allocations
+SystemState = None
+Event = None
+EventType = None
+read_temperature = None
+read_current = None
+read_blower_temperature = None
+blower_monitor = None
 
 # This class will be imported by code.py
 class CommandProcessor:
@@ -29,6 +40,18 @@ class CommandProcessor:
         self.previous_state = None
         self.last_log_time = 0
         self.log_interval = 1.0  # Log interval in seconds
+    
+    @staticmethod
+    def set_code_references(sys_state, event, event_type, read_temp, read_curr, read_blower_temp, blower_mon):
+        """Set references to code.py objects to avoid circular imports"""
+        global SystemState, Event, EventType, read_temperature, read_current, read_blower_temperature, blower_monitor
+        SystemState = sys_state
+        Event = event
+        EventType = event_type
+        read_temperature = read_temp
+        read_current = read_curr
+        read_blower_temperature = read_blower_temp
+        blower_monitor = blower_mon
         
     def set_network_interface(self, network_interface):
         """Set reference to network interface for logging"""
@@ -118,9 +141,6 @@ class CommandProcessor:
         # Debug info
         print(f"Command parsed - Type: {cmd_type}, Command: {cmd}")
         
-        # Import these locally to avoid circular imports
-        from code import SystemState, Event, EventType, read_temperature, read_current
-        
         # System control commands
         if cmd_type == "C":  # Control commands
             if cmd == "INIT":
@@ -168,7 +188,6 @@ class CommandProcessor:
                 return f"TEMP:{temp:.1f}" if temp is not None else "ERROR:Temp read failed"
                 
             elif cmd == "BLOWER_TEMP":
-                from code import read_blower_temperature
                 blower_temp = read_blower_temperature()
                 return f"BLOWER_TEMP:{blower_temp:.1f}" if blower_temp is not None else "INFO:Blower temp not available"
                 
@@ -244,7 +263,6 @@ class CommandProcessor:
         
     def _enter_manual_mode(self):
         """Enter manual control mode"""
-        from code import SystemState
         self.manual_mode = True
         # Save the current state to return to later
         self.previous_state = self.state_machine.current_state
@@ -255,7 +273,6 @@ class CommandProcessor:
         
     def _exit_manual_mode(self):
         """Exit manual control mode"""
-        from code import SystemState
         if self.manual_mode:
             self.manual_mode = False
             # Set minimum output before returning to automatic control
@@ -272,9 +289,6 @@ class CommandProcessor:
         Args:
             message: The action message to log
         """
-        # Import these locally to avoid circular imports
-        from code import read_temperature, read_current, read_blower_temperature
-        
         if self.network_interface:
             temp = read_temperature(self.safety_manager)
             blower_temp = read_blower_temperature()
@@ -293,9 +307,6 @@ class CommandProcessor:
         Periodic update for logging in manual mode
         Should be called in the main loop
         """
-        # Import these locally to avoid circular imports
-        from code import read_temperature, read_current, read_blower_temperature, blower_monitor
-        
         if self.manual_mode and self.network_interface:
             current_time = time.monotonic()
             
