@@ -75,6 +75,3 @@ SERIAL_DE_PIN = "D7"          # RS-485 Data Enable pin
 # Ethernet Interface
 ETH_CS_PIN = "D5"             # Ethernet module Chip Select (using D5 as recommended)
 ETH_RESET_PIN = "D11"         # Ethernet module Reset
-
-# Blower Monitor 
-BLOWER_SENSOR_PIN = "D0"      # Current sensing for blower

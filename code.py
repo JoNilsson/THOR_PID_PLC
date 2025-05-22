@@ -502,6 +502,15 @@ class SafetyManager:
         self.error_message = message
         console.log_error(message, error_code=code)
         return Event(EventType.ERROR_OCCURRED, {"code": code, "message": message})
+    
+    def clear_error(self):
+        """Clear the current error condition"""
+        if self.error_code != 0:
+            console.log_event(f"Error {self.error_code} cleared", "SAFETY")
+            self.error_code = 0
+            self.error_message = ""
+            return True
+        return False
 
 # State Machine class
 class StateMachine:
@@ -807,12 +816,17 @@ class StateMachine:
             return False
 
         if event.type == EventType.BUTTON_PRESSED:
-            if event.data == "INITIALIZE" and self.safety_manager.error_code != 100:
-                # Reset error state if not E-STOP error
-                self.safety_manager.error_code = 0
-                self.safety_manager.error_message = ""
-                self.transition_to(SystemState.IDLE)
-                return True
+            if event.data == "INITIALIZE":
+                # Check if this is a critical error that requires manual intervention
+                critical_errors = [100, 101]  # E-STOP (100) and Blower failure (101)
+                if self.safety_manager.error_code not in critical_errors:
+                    # Reset non-critical errors
+                    self.safety_manager.error_code = 0
+                    self.safety_manager.error_message = ""
+                    self.transition_to(SystemState.IDLE)
+                    return True
+                else:
+                    console.log_warning(f"Critical error {self.safety_manager.error_code} requires manual reset")
 
         elif event.type == EventType.ESTOP_CLEARED:
             if self.safety_manager.error_code == 100:
@@ -1001,6 +1015,7 @@ button_module = base[5]  # P1-15CDD1 in slot 5
 initialize_button_input = button_module.inputs[1]  # Initialize button
 start_button_input = button_module.inputs[2]      # Start/Shutdown button
 estop_button_input = button_module.inputs[3]      # E-STOP button
+blower_monitor_input = button_module.inputs[4]    # Blower monitor (C1-4)
 
 # Create button objects with improved debouncing
 initialize_button = Button(initialize_button_input, debounce_time=0.05, consistent_readings=3, is_normally_closed=True)
@@ -1023,7 +1038,10 @@ safety_manager = SafetyManager(estop_button_input)
 
 # Initialize blower monitor - after safety_manager is initialized
 # Will only be active if enabled in config.py
+# Uses P1-15CDD1 module input C1-4 (inputs[4]) instead of GPIO pin D0
+# to avoid conflict with P1AM-SERIAL Port 2 TX- reservation
 blower_monitor = BlowerMonitor(
+    blower_monitor_input=blower_monitor_input,
     required_states=[
         SystemState.SELF_CHECK, 
         SystemState.SYSTEM_ARMED,
@@ -1067,6 +1085,8 @@ if config.ENABLE_RS485_SERIAL:
             baudrate=9600
         )
         console.log_init("RS-485 serial interface", True)
+        # Link serial interface to command processor
+        command_processor_obj.set_serial_interface(serial_interface_obj)
     except Exception as e:
         console.log_init("RS-485 serial interface", False, str(e))
         serial_interface_obj = None
@@ -1082,12 +1102,16 @@ if config.ENABLE_NETWORK:
             reset_pin=getattr(board, config.ETH_RESET_PIN),  # Get pin from config
             port=23  # Standard telnet port
         )
+        # Connect network interface to command processor for logging
+        command_processor_obj.set_network_interface(network_interface_obj)
         console.log_init("TCP/IP network interface", True)
     except Exception as e:
         console.log_init("TCP/IP network interface", False, str(e))
         network_interface_obj = None
+        command_processor_obj.set_network_interface(None)
 else:
     console.log_hardware("TCP/IP network interface", "DISABLED", "in config")
+    command_processor_obj.set_network_interface(None)
 
 # Status reporting variables
 last_print_time = 0
@@ -1115,7 +1139,7 @@ console.log_info("Press INITIALIZE button (green) to begin")
 console.log_event("Hardware Configuration Report", "CONFIG")
 console.log_hardware("Blower Monitor", 
                     "ENABLED" if config.ENABLE_BLOWER_MONITOR else "DISABLED", 
-                    f"Sensor on {config.BLOWER_SENSOR_PIN}")
+                    "P1-15CDD1 module input C1-4")
 console.log_hardware("RS-485 Serial", 
                     "ENABLED" if config.ENABLE_RS485_SERIAL else "DISABLED", 
                     f"TX1/RX1 with DE on {config.SERIAL_DE_PIN}")
@@ -1155,6 +1179,8 @@ while True:
         # Check blower status - keep safety features operational in all modes
         is_blower_safe, blower_event = blower_monitor.check_blower(state_machine.current_state)
         if not is_blower_safe and blower_event:
+            # Broadcast critical error to all interfaces
+            command_processor_obj.broadcast_critical_error(101, "Blower failure - airflow required for safe operation")
             state_machine.process_event(blower_event)
 
         # Update interfaces if they exist

@@ -1,5 +1,73 @@
 # THOR SiC Heater Control System Changelog
 
+## May 22, 2025 - Blower Monitor Hardware Migration and Safety Enhancements
+
+### Major Changes
+
+1. **Blower Monitor Hardware Migration**
+   - Moved blower monitor input from GPIO pin D0 to P1-15CDD1 module input C1-4
+   - Eliminates conflict with P1AM-SERIAL Port 2 TX- (D0) reservation
+   - Ensures both serial ports remain available for future use
+
+2. **Enhanced Safety for Blower Failures**
+   - Blower failures now treated as critical errors (code 101) requiring manual reset
+   - Cannot be cleared via software - requires physical intervention
+   - Protects expensive heating elements from damage due to lack of cooling airflow
+
+3. **Improved Error Broadcasting**
+   - Critical errors now broadcast to all connected interfaces (RS-485 and TCP/IP)
+   - Added `broadcast_critical_error()` method to CommandProcessor
+   - Ensures all monitoring systems are immediately notified of critical failures
+
+### Technical Details
+
+#### Hardware Changes
+- **Previous**: Blower monitor used GPIO pin D0 with digitalio
+- **Current**: Uses P1-15CDD1 module input C1-4 (button_module.inputs[4])
+- **Rationale**: D0 is reserved by P1AM-SERIAL for Port 2 TX-, creating a conflict
+
+#### Code Changes
+1. **config.py**
+   - Removed `BLOWER_SENSOR_PIN` definition (no longer using GPIO pins)
+
+2. **blower_monitor.py**
+   - Updated to accept module input directly via `blower_monitor_input` parameter
+   - Changed from GPIO pin reading to module input reading
+   - Enhanced error messages to emphasize critical nature of blower failures
+
+3. **code.py**
+   - Added blower_monitor_input assignment from P1-15CDD1 module
+   - Updated BlowerMonitor initialization with module input
+   - Added critical error broadcasting on blower failure detection
+   - Updated hardware configuration logging
+
+4. **command_processor.py**
+   - Added `serial_interface` reference
+   - Added `broadcast_critical_error()` method for multi-interface alerts
+
+#### Safety Response to Blower Failure
+1. **Immediate Actions**:
+   - SCR output drops to minimum (4.0 mA)
+   - Red LED activates with ERROR_BLINK pattern (1 Hz)
+   - System transitions to ERROR state
+
+2. **Notifications**:
+   - Console: "CRITICAL: Blower failure - airflow required for safe operation"
+   - RS-485: "ERROR:CRITICAL ERROR [101]: Blower failure..."
+   - TCP/IP: Critical error logged to connected clients
+
+3. **Recovery**:
+   - Requires manual system reset after physical resolution
+   - INITIALIZE button will not clear blower errors
+   - Prevents automatic recovery that could damage equipment
+
+### Testing Results
+- Blower monitor correctly detects circuit closure/opening
+- LED indication on P1-15CDD1 module confirms signal reception
+- Critical error handling prevents system operation without airflow
+- All interfaces receive critical error notifications
+- Manual reset requirement enforced as designed
+
 ## May 21, 2025 - RS-485 and Config System Improvements
 
 ### Major Changes

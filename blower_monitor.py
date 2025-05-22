@@ -1,29 +1,28 @@
 """
 Blower Monitor Module for THOR SiC Heater Control System
 Author: Johanness A. Nilsson for TERRAFORM INDUSTRIES 2025
-Monitors blower operation via current sensing SSR
+Monitors blower operation via current sensing SSR connected to P1-15CDD1 module
 """
 
 import time
-import board
-import digitalio
 import config  # Import the central config file
 
 class BlowerMonitor:
-    """Monitors blower operation via current sensing SSR"""
+    """Monitors blower operation via current sensing SSR on P1-15CDD1 module"""
 
-    def __init__(self, required_states=None, error_callback=None):
+    def __init__(self, blower_monitor_input=None, required_states=None, error_callback=None):
         """
         Initialize blower monitoring
 
         Args:
+            blower_monitor_input: P1-15CDD1 module input (e.g., button_module.inputs[4] for C1-4)
             required_states: List of system states where blower must be running
             error_callback: Function to call when blower failure detected
         """
         # Check if blower monitoring is enabled in config
         if not config.ENABLE_BLOWER_MONITOR:
             print("Blower Monitor disabled in config.py")
-            self.blower_pin = None
+            self.blower_monitor_input = None
             self.required_states = required_states or []
             self.error_callback = error_callback
             self.blower_status = False
@@ -32,17 +31,13 @@ class BlowerMonitor:
             self.error_code = 101  # Default error code for blower issues
             return
             
-        # Use config to reserve the pin for blower monitoring
-        try:
-            print(f"Initializing Blower Monitor on pin {config.BLOWER_SENSOR_PIN}...")
-            sensor_pin = config.reserve_pin(config.BLOWER_SENSOR_PIN, "Blower Monitor")
-            self.blower_pin = digitalio.DigitalInOut(sensor_pin)
-            self.blower_pin.direction = digitalio.Direction.INPUT
-            self.blower_pin.pull = digitalio.Pull.UP  # Pull-up, so LOW means current detected
-        except ValueError as e:
-            print(f"Warning: Could not initialize blower sensor: {e}")
-            # Create a dummy pin for testing
-            self.blower_pin = None
+        # Use the provided P1-15CDD1 module input
+        if blower_monitor_input is None:
+            print("Warning: No blower monitor input provided to BlowerMonitor")
+            self.blower_monitor_input = None
+        else:
+            print("Initializing Blower Monitor on P1-15CDD1 module input C1-4...")
+            self.blower_monitor_input = blower_monitor_input
 
         self.required_states = required_states or []
         self.error_callback = error_callback
@@ -56,15 +51,16 @@ class BlowerMonitor:
         Check if blower is running based on current sensor
         Returns True if running, False if not
         """
-        # Handle the case where blower_pin is None (hardware not available)
-        if self.blower_pin is None:
+        # Handle the case where blower_monitor_input is None (hardware not available)
+        if self.blower_monitor_input is None:
             # Assume blower is working in test/development mode
             print("Note: Blower sensor not available, assuming blower is running (test mode)")
             return True
             
-        # LOW signal (False) means current detected == blower running
-        # Invert value; SSR closes (LOW) when current is detected
-        return not self.blower_pin.value
+        # Read the actual value from the P1-15CDD1 module input
+        # The SSR is Normally Open (NO) - closes when current is detected
+        # Similar to E-STOP, just return the raw value
+        return self.blower_monitor_input.value
 
     def check_blower(self, current_state):
         """
@@ -90,7 +86,7 @@ class BlowerMonitor:
             if self.error_callback:
                 return False, self.error_callback(
                     self.error_code, 
-                    "Blower not running - airflow required for operation"
+                    "CRITICAL: Blower failure - airflow required for safe operation"
                 )
             return False, None
 

@@ -1,5 +1,7 @@
 # THOR SiC Heater Control System
 
+> For detailed information about recent changes and updates, see the [CHANGELOG.md](CHANGELOG.md).
+
 ## Overview
 
 This project implements a sophisticated temperature control system for Terraform Industries' THOR Silicon Carbide (SiC) Heater arrays. The system uses a P1AM-200 PLC with multiple I/O modules to precisely control 12 silicon carbide heating elements through SCR (Silicon-Controlled Rectifier) units using 4-20mA control signals.
