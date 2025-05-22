@@ -209,6 +209,17 @@ class CommandProcessor:
                     return f"PID:{self.pid_controller.kp:.2f},{self.pid_controller.ki:.2f},{self.pid_controller.kd:.2f}"
                 else:
                     return "ERROR:PID not active in manual mode"
+            
+            elif cmd == "RS485":
+                # RS485 diagnostic - simplified due to memory constraints
+                return "RS485:OK"
+            
+            elif cmd == "MEM":
+                # Memory diagnostic
+                import gc
+                gc.collect()
+                free = gc.mem_free()
+                return "MEM:" + str(free)
                 
         # Set commands
         elif cmd_type == "S":  # Set commands
@@ -247,17 +258,6 @@ class CommandProcessor:
                         return "ERROR:Invalid increment value"
                 else:
                     return "ERROR:Manual mode required for direct output control"
-            
-            elif cmd == "RS485":
-                # RS485 diagnostic - simplified due to memory constraints
-                return "RS485:OK"
-            
-            elif cmd == "MEM":
-                # Memory diagnostic
-                import gc
-                gc.collect()
-                free = gc.mem_free()
-                return "MEM:" + str(free)
                 
         return "ERROR:Unknown command"
         
