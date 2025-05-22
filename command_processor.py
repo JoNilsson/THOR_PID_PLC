@@ -251,7 +251,13 @@ class CommandProcessor:
                 if self.manual_mode:
                     try:
                         # Extract the value part after the equals sign
-                        increment_part = cmd.split("OUTPUT_INCREMENT=")[1].strip()
+                        # For S:OUTPUT_INCREMENT=1, we need to get the full command string
+                        if cmd == "OUTPUT_INCREMENT=":
+                            # Get value from the original command
+                            increment_part = command.split("OUTPUT_INCREMENT=")[1].strip()
+                        else:
+                            # Legacy format support
+                            increment_part = cmd.split("OUTPUT_INCREMENT=")[1].strip()
                         increment = float(increment_part)
                         new_output = self.scr_output.real + increment
                         # Constrain to valid 4-20mA range
