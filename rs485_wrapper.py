@@ -28,6 +28,7 @@ class RS485:
         # Store baudrate for timing calculations
         self.baudrate = getattr(uart, 'baudrate', 9600)  # Default to 9600 if not available
         print(f"RS-485 wrapper initialized with baudrate: {self.baudrate}")
+        print(f"RS-485 DE pin initial state: {'HIGH' if self.de_pin.value else 'LOW'} (should be LOW for RX)")
         
     @property
     def in_waiting(self):

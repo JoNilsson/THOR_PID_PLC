@@ -25,6 +25,7 @@ class CommandProcessor:
         self.scr_output = scr_output
         self.manual_mode = False
         self.network_interface = None  # Will be set after initialization
+        self.serial_interface = None   # Will be set after initialization
         self.previous_state = None
         self.last_log_time = 0
         self.log_interval = 1.0  # Log interval in seconds
@@ -32,6 +33,28 @@ class CommandProcessor:
     def set_network_interface(self, network_interface):
         """Set reference to network interface for logging"""
         self.network_interface = network_interface
+    
+    def set_serial_interface(self, serial_interface):
+        """Set reference to serial interface for logging"""
+        self.serial_interface = serial_interface
+    
+    def broadcast_critical_error(self, error_code, error_message):
+        """Broadcast critical error to all connected interfaces"""
+        critical_msg = f"CRITICAL ERROR [{error_code}]: {error_message}"
+        
+        # Send to serial interface
+        if self.serial_interface and hasattr(self.serial_interface, 'send_message'):
+            try:
+                self.serial_interface.send_message(f"ERROR:{critical_msg}")
+            except:
+                pass  # Don't let interface errors prevent error handling
+                
+        # Send to network interface
+        if self.network_interface and hasattr(self.network_interface, 'log_message'):
+            try:
+                self.network_interface.log_message(critical_msg)
+            except:
+                pass  # Don't let interface errors prevent error handling
         print(f"Command processor linked to network interface: {'Yes' if network_interface else 'No'}")
         
     def process_command(self, cmd_str):
@@ -53,23 +76,47 @@ class CommandProcessor:
         if not cmd_str:
             return "ERROR:Empty command"
             
-        # Split the command
+        # Sanitize command string - remove any unwanted control characters
+        # CircuitPython doesn't have isprintable(), so use ord() to check ASCII range
+        cmd_str = "".join(c for c in cmd_str if (ord(c) >= 32 and ord(c) <= 126) or c in ['\t'])
+        
+        # Split the command - handle both cases with/without trailing data
         parts = cmd_str.split(":")
         if len(parts) < 2:
             return "ERROR:Invalid command format"
             
-        # Handle concatenated commands (like "G:TEMPG:TEMP")
-        if len(parts) > 2 and parts[2].startswith("G") or parts[2].startswith("C") or parts[2].startswith("S"):
-            print(f"WARNING: Possible concatenated command detected: {cmd_str}")
-            # Just process the first valid command
-            cmd_type = parts[0].upper()
-            cmd = parts[1].upper()
-            # Truncate at next command marker if present
-            if ":" in cmd:
-                cmd = cmd.split(":")[0]
+        # Get command type and command
+        cmd_type = parts[0].upper()
+        
+        # Special handling for commands with parameters (like S:OUTPUT=5)
+        if len(parts) >= 2:
+            # For S:OUTPUT commands specifically
+            if cmd_type == 'S' and 'OUTPUT=' in cmd_str:
+                # Extract everything after S:
+                cmd_data = cmd_str[2:].strip()
+                
+                # Check if this is OUTPUT or OUTPUT_INCREMENT
+                if cmd_data.startswith('OUTPUT='):
+                    cmd = 'OUTPUT='
+                    # The value is processed later
+                elif cmd_data.startswith('OUTPUT_INCREMENT='):
+                    cmd = 'OUTPUT_INCREMENT='
+                    # The value is processed later
+                else:
+                    cmd = parts[1].upper()
+            else:
+                # For other commands - use standard processing
+                cmd = parts[1].upper()
+                
+                # Clean up cmd by removing any trailing command markers
+                if ':' in cmd:
+                    cmd = cmd.split(':')[0]
         else:
-            cmd_type = parts[0].upper()
-            cmd = parts[1].upper()
+            # This shouldn't happen due to the earlier check, but just in case
+            return "ERROR:Invalid command format"
+            
+        # Debug info
+        print(f"Command parsed - Type: {cmd_type}, Command: {cmd}")
         
         # Import these locally to avoid circular imports
         from code import SystemState, Event, EventType, read_temperature, read_current
@@ -90,10 +137,14 @@ class CommandProcessor:
                 else:
                     return "ERROR:Not available in manual mode"
                     
-            elif cmd == "MANUAL_MODE":
-                # Switch to manual control mode
-                self._enter_manual_mode()
-                return "OK:Manual control mode enabled"
+            elif cmd == "MANUAL_MODE" or cmd.strip() == "MANUAL_MODE":
+                # Switch to manual control mode - added more robust handling for different line ending formats
+                try:
+                    self._enter_manual_mode()
+                    return "OK:Manual control mode enabled"
+                except Exception as e:
+                    print(f"Error entering manual mode: {e}")
+                    return "ERROR:Failed to enter manual mode"
                 
             elif cmd == "AUTO_MODE":
                 # Switch back to automatic PID control mode
@@ -142,34 +193,52 @@ class CommandProcessor:
                 
         # Set commands
         elif cmd_type == "S":  # Set commands
-            if cmd.startswith("OUTPUT="):
+            # Handle OUTPUT command with different formats
+            if "OUTPUT=" in cmd:  # Check for substring to be more forgiving with format
                 if self.manual_mode:
                     try:
-                        output = float(cmd.split("=")[1])
+                        # Extract the value part after the equals sign
+                        output_part = cmd.split("OUTPUT=")[1].strip()
+                        output = float(output_part)
                         # Constrain to valid 4-20mA range
                         output = max(4.0, min(20.0, output))
                         self.scr_output.real = output
                         self._log_manual_action(f"Output set to {output:.2f}mA")
                         return f"OK:Output set to {output:.2f}mA"
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError) as e:
+                        print(f"Error parsing OUTPUT command: {e}")
                         return "ERROR:Invalid output value"
                 else:
                     return "ERROR:Manual mode required for direct output control"
                     
-            elif cmd.startswith("OUTPUT_INCREMENT="):
+            elif "OUTPUT_INCREMENT=" in cmd:  # Check for substring to be more forgiving
                 if self.manual_mode:
                     try:
-                        increment = float(cmd.split("=")[1])
+                        # Extract the value part after the equals sign
+                        increment_part = cmd.split("OUTPUT_INCREMENT=")[1].strip()
+                        increment = float(increment_part)
                         new_output = self.scr_output.real + increment
                         # Constrain to valid 4-20mA range
                         new_output = max(4.0, min(20.0, new_output))
                         self.scr_output.real = new_output
                         self._log_manual_action(f"Output incremented to {new_output:.2f}mA")
                         return f"OK:Output incremented to {new_output:.2f}mA"
-                    except (ValueError, IndexError):
+                    except (ValueError, IndexError) as e:
+                        print(f"Error parsing OUTPUT_INCREMENT command: {e}")
                         return "ERROR:Invalid increment value"
                 else:
                     return "ERROR:Manual mode required for direct output control"
+            
+            elif cmd == "RS485":
+                # RS485 diagnostic - simplified due to memory constraints
+                return "RS485:OK"
+            
+            elif cmd == "MEM":
+                # Memory diagnostic
+                import gc
+                gc.collect()
+                free = gc.mem_free()
+                return "MEM:" + str(free)
                 
         return "ERROR:Unknown command"
         

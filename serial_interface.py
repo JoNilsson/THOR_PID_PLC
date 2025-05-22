@@ -80,6 +80,10 @@ class SerialInterface:
             # Initialize command buffer
             self.buffer = ""
             
+            # Debug timing
+            self.last_debug_time = time.monotonic()
+            self.debug_interval = 10.0  # Print debug info every 10 seconds
+            
             # Send welcome message
             self.send_message("THOR SiC Heater Control System")
             self.send_message("RS-485 Control Interface Ready")
@@ -102,6 +106,13 @@ class SerialInterface:
             return
         
         try:
+            # Periodic debug output
+            current_time = time.monotonic()
+            if current_time - self.last_debug_time >= self.debug_interval:
+                self.last_debug_time = current_time
+                de_state = "HIGH" if self.rs485.de_pin.value else "LOW"
+                print(f"RS-485 Debug: DE pin={de_state}, in_waiting={self.rs485.in_waiting}")
+            
             # Check if data is available
             if self.rs485.in_waiting:
                 # Read available data - limit to a reasonable amount
@@ -121,59 +132,111 @@ class SerialInterface:
                         else:
                             self.buffer += text
                         
-                        # Check for complete commands (terminated by CR or LF)
+                        # Check for command completion by presence of command type and terminator
+                        command_complete = False
+                        
+                        # Look for command termination (CR or LF)
                         if '\r' in self.buffer or '\n' in self.buffer:
-                            # Split buffer by line endings
-                            lines = self.buffer.splitlines()
+                            command_complete = True
                             
-                            # Print all lines for debugging
+                            # Use a more robust command extraction method
+                            buffer_copy = self.buffer
+                            # Normalize line endings
+                            buffer_copy = buffer_copy.replace('\r\n', '\n').replace('\r', '\n')
+                            
+                            # Split into lines, preserving empty lines
+                            lines = buffer_copy.split('\n')
+                            
+                            # Print diagnostic info
                             print(f"RS-485 buffer split into {len(lines)} lines")
                             
-                            # Last line might be incomplete, keep it in buffer
-                            self.buffer = lines[-1] if lines else ""
+                            # Process all complete lines (all except the last one if it's not terminated)
+                            complete_lines = lines[:-1]
                             
-                            # Process complete lines
-                            for line in lines[:-1] if lines else []:
-                                line = line.strip()
-                                if line:
-                                    # Process command and send response
-                                    print(f"RS-485 received command: '{line}'")
-                                    try:
-                                        response = self.command_processor.process_command(line)
-                                        print(f"RS-485 sending response: '{response}'")
-                                        self.send_message(response)
-                                    except Exception as e:
-                                        print(f"Error processing command: {e}")
-                                        self.send_message(f"ERROR:Internal error processing command")
-                                        # Clear buffer to recover from error state
-                                        self.buffer = ""
+                            # Keep the last line in buffer only if it's not empty
+                            if lines and lines[-1]:
+                                self.buffer = lines[-1]
+                            else:
+                                self.buffer = ""
+                            
+                            # Process each complete line
+                            for line in complete_lines:
+                                self._process_command_line(line)
+                            
+                        # Check for a complete command in the buffer without terminator
+                        # This could happen with slow serial transmission or packet splitting
+                        elif ':' in self.buffer:
+                            # Check if we have a complete command by looking for command type patterns
+                            parts = self.buffer.split(':')
+                            cmd_type = parts[0].upper() if parts else ""
+                            
+                            # Check if command type is valid and we have a command
+                            if cmd_type in ['C', 'G', 'S'] and len(parts) >= 2:
+                                # Check if command appears complete based on format
+                                if cmd_type == 'S' and 'OUTPUT=' in self.buffer:
+                                    command_complete = True
+                                elif cmd_type == 'G' and any(cmd in parts[1].upper() for cmd in ['TEMP', 'STATE', 'CURRENT', 'OUTPUT', 'PID']):
+                                    command_complete = True
+                                elif cmd_type == 'C' and any(cmd in parts[1].upper() for cmd in ['INIT', 'START', 'MANUAL_MODE', 'AUTO_MODE', 'STOP']):
+                                    command_complete = True
+                            
+                            if command_complete:
+                                print(f"Processing complete unterminated command: '{self.buffer}'")
+                                self._process_command_line(self.buffer)
+                                self.buffer = ""
+                                
                     except UnicodeError as e:
                         # Clear buffer on decode error
                         print(f"RS-485 decode error: {e}, clearing buffer")
                         print(f"Raw data was: {data}")
                         self.buffer = ""
             
-            # Check if buffer has been sitting too long without a terminator
-            # This helps recover from partial commands
-            if self.buffer and len(self.buffer) > 0:
-                # If buffer contains a command without CR/LF for too long, try to process it
-                if ':' in self.buffer and len(self.buffer) >= 3:
-                    # After 1 second, force processing of partial command
-                    print(f"Processing potential unterminated command: '{self.buffer}'")
-                    line = self.buffer.strip()
-                    self.buffer = ""
-                    
-                    try:
-                        response = self.command_processor.process_command(line)
-                        print(f"RS-485 sending response: '{response}'")
-                        self.send_message(response)
-                    except Exception as e:
-                        print(f"Error processing unterminated command: {e}")
-                        self.send_message(f"ERROR:Invalid command format")
-        
+            # Check for partial commands that have been sitting in buffer
+            if self.buffer and len(self.buffer) > 0 and ':' in self.buffer:
+                # Check if we have what looks like a valid command start
+                parts = self.buffer.split(':')
+                cmd_type = parts[0].upper() if parts else ""
+                
+                if cmd_type in ['C', 'G', 'S']:
+                    # If we have a command type, check if we can process it
+                    if cmd_type == 'S' and 'OUTPUT=' in self.buffer:
+                        print(f"Processing delayed unterminated command: '{self.buffer}'")
+                        self._process_command_line(self.buffer)
+                        self.buffer = ""
+                    elif cmd_type == 'G' and len(parts) >= 2:
+                        print(f"Processing delayed unterminated command: '{self.buffer}'")
+                        self._process_command_line(self.buffer)
+                        self.buffer = ""
+                    elif cmd_type == 'C' and len(parts) >= 2:
+                        print(f"Processing delayed unterminated command: '{self.buffer}'")
+                        self._process_command_line(self.buffer)
+                        self.buffer = ""
+                        
         except Exception as e:
             # Catch-all error handler to prevent serial processing from crashing the system
             print(f"Unexpected error in RS-485 update: {e}")
+            self.buffer = ""  # Clear buffer to recover
+                        
+    def _process_command_line(self, line):
+        """Process a single command line and send response"""
+        # Clean up the line
+        line = line.strip()
+        if not line:
+            return
+            
+        # Debug output
+        print(f"RS-485 received command: '{line}'")
+        
+        try:
+            # Process the command
+            response = self.command_processor.process_command(line)
+            # Simplified debug to save memory
+            print("RS-485 response ready")
+            self.send_message(response)
+        except Exception as e:
+            # Handle errors
+            print(f"Error processing command: {e}")
+            self.send_message(f"ERROR:Internal error processing command")
             self.buffer = ""  # Clear buffer to recover
     
     def send_message(self, message):
