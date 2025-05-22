@@ -63,6 +63,14 @@ class SerialInterface:
                                  timeout=0.1, receiver_buffer_size=128)
                                  
                 print(f"UART created successfully: baudrate={baudrate}, bits=8, parity=None, stop=1")
+                
+                # Verify UART is working by checking its properties
+                actual_baudrate = uart.baudrate
+                print(f"UART actual baudrate: {actual_baudrate}")
+                
+                # Try writing a test byte to see if UART is functional
+                test_bytes = uart.write(b'\x00')
+                print(f"UART test write: {test_bytes} bytes written")
             except Exception as e:
                 raise Exception(f"Failed to create UART: {e}")
             

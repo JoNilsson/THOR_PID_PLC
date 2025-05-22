@@ -68,9 +68,9 @@ def list_reserved_pins():
 # These are the central definitions for all pins in the system
 
 # RS-485 Serial Interface
-# P1AM-SERIAL Port 1 pins (from P1AM_pin_notes.md)
-SERIAL_TX_PIN = "D14"         # Port 1 TX- pin
-SERIAL_RX_PIN = "D13"         # Port 1 RX+ pin 
+# P1AM-SERIAL Port 1 configuration
+SERIAL_TX_PIN = "TX1"         # Port 1 UART TX (board.TX1)
+SERIAL_RX_PIN = "RX1"         # Port 1 UART RX (board.RX1)
 SERIAL_DE_PIN = "A6"          # Port 1 DE/RE pin
 SERIAL_MODE_PIN = "D3"        # Port 1 Mode pin (LOW=RS485)
 

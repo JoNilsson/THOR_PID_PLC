@@ -82,18 +82,20 @@ class RS485:
         bytes_written = self.uart.write(data)
         print(f"RS-485 TX: {data} ({bytes_written} bytes)")
         
-        # Force UART to flush output buffer
-        # CircuitPython doesn't have flush() but we can try reset_output_buffer
-        try:
-            # Some CircuitPython versions might have this
-            if hasattr(self.uart, 'reset_output_buffer'):
-                self.uart.reset_output_buffer()
-        except:
-            pass
-            
+        # Check if bytes were actually written
+        if bytes_written != len(data):
+            print(f"RS-485 WARNING: Only wrote {bytes_written} of {len(data)} bytes!")
+        
+        # Force UART to transmit by waiting for TX to complete
+        # CircuitPython UART doesn't have a flush method, but we can check in_waiting
+        # Some versions have a 'out_waiting' property that shows bytes in TX buffer
+        if hasattr(self.uart, 'out_waiting'):
+            while self.uart.out_waiting > 0:
+                time.sleep(0.001)
+                
         # Wait for UART to actually transmit
         # CircuitPython's UART might buffer, so we need to ensure it's sent
-        time.sleep(0.010)  # Wait 10ms
+        time.sleep(0.020)  # Wait 20ms to ensure transmission
         
         # Allow more time for transmission to complete based on data length and baud rate
         # Calculate delay based on bytes and baud rate (assuming 10 bits per byte with start/stop)
