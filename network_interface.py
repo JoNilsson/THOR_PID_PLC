@@ -8,6 +8,7 @@ import board
 import busio
 import digitalio
 import time
+import config  # Import the central config file
 
 # Try to import Ethernet libraries, but make them optional
 try:
@@ -45,6 +46,11 @@ class NetworkInterface:
         self.eth = None
         self.pool = None
         
+        # Check if network interface is enabled in config
+        if not config.ENABLE_NETWORK:
+            print("Network interface disabled in config.py")
+            return
+        
         # Skip Ethernet initialization if libraries not available
         if not ETHERNET_AVAILABLE:
             print("Network interface in simulation mode (no hardware)")
@@ -53,8 +59,22 @@ class NetworkInterface:
         try:
             # Initialize SPI for Ethernet module
             spi = busio.SPI(board.SCK, MOSI=board.MOSI, MISO=board.MISO)
-            cs = digitalio.DigitalInOut(cs_pin)
-            reset = digitalio.DigitalInOut(reset_pin)
+            
+            # Setup pins using direct access (standard Adafruit method)
+            print(f"Setting up Ethernet pins {config.ETH_CS_PIN} and {config.ETH_RESET_PIN}...")
+            
+            try:
+                # Create the digitalio objects directly without using pin reservation
+                # This is the standard approach recommended by Adafruit
+                print(f"Creating DigitalInOut for CS pin...")
+                cs = digitalio.DigitalInOut(getattr(board, config.ETH_CS_PIN))
+                print("CS pin created successfully")
+                
+                print(f"Creating DigitalInOut for Reset pin...")
+                reset = digitalio.DigitalInOut(getattr(board, config.ETH_RESET_PIN))
+                print("Reset pin created successfully")
+            except Exception as e:
+                raise Exception(f"Failed to access Ethernet pins: {e}")
             
             # Initialize Ethernet interface
             print("Initializing Ethernet interface...")
@@ -100,11 +120,19 @@ class NetworkInterface:
                     else:
                         raise  # Re-raise the exception after all retries fail
             
+            # Get IP address information
+            self.ip_address = self.eth.pretty_ip(self.eth.ip_address)
+            self.subnet_mask = self.eth.pretty_ip(self.eth.subnet_mask)
+            self.gateway_ip = self.eth.pretty_ip(self.eth.gateway_ip)
+            self.dns_server = self.eth.pretty_ip(self.eth.dns_server)
+            
             # Display network information
-            print(f"IP Address: {self.eth.pretty_ip(self.eth.ip_address)}")
-            print(f"Subnet Mask: {self.eth.pretty_ip(self.eth.subnet_mask)}")
-            print(f"Gateway: {self.eth.pretty_ip(self.eth.gateway_ip)}")
-            print(f"DNS Server: {self.eth.pretty_ip(self.eth.dns_server)}")
+            print("="*50)
+            print(f"NETWORK INTERFACE ONLINE")
+            print(f"IP Address: {self.ip_address}")
+            print(f"Subnet Mask: {self.subnet_mask}")
+            print(f"Gateway: {self.gateway_ip}")
+            print(f"DNS Server: {self.dns_server}")
                 
             # Create socket server
             print(f"Starting TCP server on port {port}...")
@@ -115,7 +143,10 @@ class NetworkInterface:
             self.server_socket.bind((0, port))
             self.server_socket.listen(1)
             
-            print(f"Network interface ready on {self.eth.pretty_ip(self.eth.ip_address)}:{port}")
+            # Display connection information prominently
+            print("="*50)
+            print(f"DATA LOGGING AVAILABLE AT: {self.ip_address}:{port}")
+            print("="*50)
         except Exception as e:
             print(f"Error initializing network interface: {e}")
             print("Network interface in fallback mode (no hardware)")

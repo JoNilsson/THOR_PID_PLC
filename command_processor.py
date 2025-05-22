@@ -32,6 +32,7 @@ class CommandProcessor:
     def set_network_interface(self, network_interface):
         """Set reference to network interface for logging"""
         self.network_interface = network_interface
+        print(f"Command processor linked to network interface: {'Yes' if network_interface else 'No'}")
         
     def process_command(self, cmd_str):
         """
@@ -43,12 +44,32 @@ class CommandProcessor:
         Returns:
             Response string with format TYPE:VALUE or ERROR:MESSAGE
         """
-        parts = cmd_str.strip().split(":")
+        # Guard against very long commands
+        if len(cmd_str) > 50:
+            return "ERROR:Command too long"
+            
+        # Guard against empty commands
+        cmd_str = cmd_str.strip()
+        if not cmd_str:
+            return "ERROR:Empty command"
+            
+        # Split the command
+        parts = cmd_str.split(":")
         if len(parts) < 2:
             return "ERROR:Invalid command format"
             
-        cmd_type = parts[0].upper()
-        cmd = parts[1].upper()
+        # Handle concatenated commands (like "G:TEMPG:TEMP")
+        if len(parts) > 2 and parts[2].startswith("G") or parts[2].startswith("C") or parts[2].startswith("S"):
+            print(f"WARNING: Possible concatenated command detected: {cmd_str}")
+            # Just process the first valid command
+            cmd_type = parts[0].upper()
+            cmd = parts[1].upper()
+            # Truncate at next command marker if present
+            if ":" in cmd:
+                cmd = cmd.split(":")[0]
+        else:
+            cmd_type = parts[0].upper()
+            cmd = parts[1].upper()
         
         # Import these locally to avoid circular imports
         from code import SystemState, Event, EventType, read_temperature, read_current

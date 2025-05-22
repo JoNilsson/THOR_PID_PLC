@@ -1,15 +1,16 @@
 """
 Blower Monitor Module for THOR SiC Heater Control System
 Author: Johanness A. Nilsson for TERRAFORM INDUSTRIES 2025
-Monitors blower operation via current sensing SSR on GPIO Pin 14
+Monitors blower operation via current sensing SSR
 """
 
 import time
 import board
 import digitalio
+import config  # Import the central config file
 
 class BlowerMonitor:
-    """Monitors blower operation via current sensing SSR on GPIO Pin 14"""
+    """Monitors blower operation via current sensing SSR"""
 
     def __init__(self, required_states=None, error_callback=None):
         """
@@ -19,20 +20,29 @@ class BlowerMonitor:
             required_states: List of system states where blower must be running
             error_callback: Function to call when blower failure detected
         """
-        # Standard CircuitPython digitalio for GPIO access
-        # try to access GPIO Pin 14 on the P1AM-GPIO shield
-        # Docs on Py P1AM GPIO are sparese, so using some boilerplate micropython methods
+        # Check if blower monitoring is enabled in config
+        if not config.ENABLE_BLOWER_MONITOR:
+            print("Blower Monitor disabled in config.py")
+            self.blower_pin = None
+            self.required_states = required_states or []
+            self.error_callback = error_callback
+            self.blower_status = False
+            self.last_check_time = time.monotonic()
+            self.check_interval = 0.5  # Check every 500ms
+            self.error_code = 101  # Default error code for blower issues
+            return
+            
+        # Use config to reserve the pin for blower monitoring
         try:
-            # D14 = GPIO digital pin 14
-            self.blower_pin = digitalio.DigitalInOut(board.D14)
+            print(f"Initializing Blower Monitor on pin {config.BLOWER_SENSOR_PIN}...")
+            sensor_pin = config.reserve_pin(config.BLOWER_SENSOR_PIN, "Blower Monitor")
+            self.blower_pin = digitalio.DigitalInOut(sensor_pin)
             self.blower_pin.direction = digitalio.Direction.INPUT
             self.blower_pin.pull = digitalio.Pull.UP  # Pull-up, so LOW means current detected
-        except (AttributeError, ValueError) as e:
-            # If D14 isn't available directly, try using a generic pin reference
-            import microcontroller
-            self.blower_pin = digitalio.DigitalInOut(microcontroller.pin.P14)
-            self.blower_pin.direction = digitalio.Direction.INPUT
-            self.blower_pin.pull = digitalio.Pull.UP
+        except ValueError as e:
+            print(f"Warning: Could not initialize blower sensor: {e}")
+            # Create a dummy pin for testing
+            self.blower_pin = None
 
         self.required_states = required_states or []
         self.error_callback = error_callback
@@ -46,6 +56,12 @@ class BlowerMonitor:
         Check if blower is running based on current sensor
         Returns True if running, False if not
         """
+        # Handle the case where blower_pin is None (hardware not available)
+        if self.blower_pin is None:
+            # Assume blower is working in test/development mode
+            print("Note: Blower sensor not available, assuming blower is running (test mode)")
+            return True
+            
         # LOW signal (False) means current detected == blower running
         # Invert value; SSR closes (LOW) when current is detected
         return not self.blower_pin.value

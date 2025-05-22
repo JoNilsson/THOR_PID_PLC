@@ -25,6 +25,10 @@ class RS485:
         self.de_pin.switch_to_output(value=False)  # Start with DE pin low (receive mode)
         self.timeout = 0.1  # Default timeout in seconds
         
+        # Store baudrate for timing calculations
+        self.baudrate = getattr(uart, 'baudrate', 9600)  # Default to 9600 if not available
+        print(f"RS-485 wrapper initialized with baudrate: {self.baudrate}")
+        
     @property
     def in_waiting(self):
         """Get the number of bytes waiting in the receive buffer"""
@@ -44,7 +48,13 @@ class RS485:
         self.de_pin.value = False
         
         # Read data from UART
-        return self.uart.read(size)
+        data = self.uart.read(size)
+        
+        # Log received data
+        if data and len(data) > 0:
+            print(f"RS-485 RX: {data} ({len(data)} bytes)")
+            
+        return data
         
     def write(self, data):
         """
@@ -59,17 +69,27 @@ class RS485:
         # Set DE pin high (transmit mode)
         self.de_pin.value = True
         
-        # Small delay to ensure DE pin has time to switch
-        time.sleep(0.001)
+        # Longer delay to ensure DE pin has time to switch
+        time.sleep(0.005)  # Increased from 0.001 to 0.005
         
         # Write data
         bytes_written = self.uart.write(data)
+        print(f"RS-485 TX: {data} ({bytes_written} bytes)")
         
-        # Wait for transmission to complete
+        # Allow more time for transmission to complete based on data length and baud rate
+        # Calculate delay based on bytes and baud rate (assuming 10 bits per byte with start/stop)
+        bits_to_send = len(data) * 10  # 8 data bits + 1 start bit + 1 stop bit
+        seconds_per_bit = 1.0 / self.uart.baudrate
+        transmission_time = bits_to_send * seconds_per_bit
+        
+        # Add a safety margin (at least 5ms, or double the calculated time)
+        delay = max(0.005, transmission_time * 2)
+        time.sleep(delay)
+        
+        # Clear input buffer
         self.uart.reset_input_buffer()
         
         # Set DE pin back to low (receive mode)
-        time.sleep(0.001)  # Wait for last byte to finish transmitting
         self.de_pin.value = False
         
         return bytes_written

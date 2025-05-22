@@ -187,6 +187,7 @@ The system can be controlled remotely using the RS-485 interface. Here's how to 
    - Connect the RS-485 B(-) wire to the B(-) terminal on the P1AM-SERIAL module
    - If available, connect the ground/shield wire to the GND terminal
    - For longer distances, ensure proper RS-485 termination (120Ω resistor across A and B on both ends)
+   - **Important**: Using pin D7 for RS-485 DE (Data Enable) control
 
 3. **Terminal Software Configuration**:
    - Port: Select the COM port assigned to your USB-RS485 converter
@@ -246,6 +247,7 @@ The system provides data logging and read-only monitoring via Ethernet. Here's h
    - Connect an Ethernet cable from the P1AM-ETH module to your network switch/router
    - Ensure the P1AM-ETH module's status LEDs show proper link status
    - The system will automatically acquire an IP address via DHCP
+   - **Important**: Using pins D10 (CS) and D11 (Reset) for Ethernet module control
 
 3. **Finding the System IP Address**:
    - The IP address is displayed on the serial console during startup

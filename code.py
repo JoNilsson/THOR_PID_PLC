@@ -33,6 +33,9 @@ import board
 import digitalio
 from blower_monitor import BlowerMonitor
 
+# Import console manager for improved logging
+from console_manager import console
+
 # Import serial control modules
 import command_processor
 import serial_interface
@@ -307,7 +310,7 @@ class LEDManager:
         """Set a specific pattern for a specific LED"""
         if led_name in ["green", "amber", "blue", "red"] and pattern_name in self.patterns:
             self.active_patterns[led_name] = pattern_name
-            print(f"Set {led_name} LED to {pattern_name} pattern")
+            console.log_info(f"Set {led_name} LED to {pattern_name} pattern")
 
     def set_state_indication(self, system_state):
         """Configure LED patterns based on current system state"""
@@ -350,7 +353,7 @@ class LEDManager:
                 if self.active_patterns[led] == "ON":
                     self.active_patterns[led] = "FAST_BLINK"
 
-        print(f"Updated LED patterns for state: {SystemState.NAMES[system_state]}")
+        console.log_info(f"Updated LED patterns for state: {SystemState.NAMES[system_state]}")
         
     def set_manual_mode_indication(self):
         """Configure LED patterns for manual control mode"""
@@ -365,7 +368,7 @@ class LEDManager:
         # Offset the timers to make them alternate
         self.pattern_timers["blue"] = time.monotonic() - (BLINK_INTERVAL_SLOW / 2)
         
-        print("Updated LED patterns for MANUAL CONTROL mode")
+        console.log_info("Updated LED patterns for MANUAL CONTROL mode")
 
     def update(self):
         """Update all LED states based on their current patterns"""
@@ -473,13 +476,13 @@ class SafetyManager:
             self.error_code = 100
             self.error_message = "EMERGENCY STOP ACTIVATED"
             self.previous_estop_state = estop_state
-            print("E-STOP ACTIVATED")
+            console.log_error("E-STOP ACTIVATED", error_code=100)
             return False, Event(EventType.ESTOP_ACTIVATED)
 
         elif not estop_state and self.previous_estop_state:
             # E-STOP was just cleared
             self.previous_estop_state = estop_state
-            print("E-STOP CLEARED")
+            console.log_event("E-STOP CLEARED", "SAFETY")
             return True, Event(EventType.ESTOP_CLEARED)
 
         self.previous_estop_state = estop_state
@@ -497,7 +500,7 @@ class SafetyManager:
         """Set an error condition"""
         self.error_code = code
         self.error_message = message
-        print(f"ERROR {code}: {message}")
+        console.log_error(message, error_code=code)
         return Event(EventType.ERROR_OCCURRED, {"code": code, "message": message})
 
 # State Machine class
@@ -537,10 +540,11 @@ class StateMachine:
 
         # Validate the transition
         if not self.is_valid_transition(self.current_state, new_state):
-            print(f"ERROR: Invalid state transition from {SystemState.NAMES[self.current_state]} to {SystemState.NAMES[new_state]}")
+            console.log_error(f"Invalid state transition from {SystemState.NAMES[self.current_state]} to {SystemState.NAMES[new_state]}")
             return
 
-        print(f"Transitioning from {SystemState.NAMES[self.current_state]} to {SystemState.NAMES[new_state]}")
+        # Log the state transition
+        console.log_state_change(SystemState.NAMES[self.current_state], SystemState.NAMES[new_state])
 
         # Store state history
         if record_history:
@@ -561,7 +565,7 @@ class StateMachine:
  
     def _enter_state(self, state, previous_state):
         """Perform entry actions for the given state"""
-        print(f"Entering {SystemState.NAMES[state]} state")
+        # State entry is already logged by transition_to method
 
         # Configure LED patterns for the new state
         self.led_manager.set_state_indication(state)
@@ -583,27 +587,27 @@ class StateMachine:
             self.scr_output.real = 4.0
 
         elif state == SystemState.WARM_UP:
-            print(f"Setting warm-up setpoint: {WARM_UP_SETPOINT}°F")
+            console.log_info(f"Setting warm-up setpoint: {WARM_UP_SETPOINT}°F")
             self.pid_controller.update_setpoint(WARM_UP_SETPOINT)
 
         elif state == SystemState.WARM_UP_COMPLETE:
-            print("Warm-up temperature reached")
+            console.log_success("Warm-up temperature reached")
 
         elif state == SystemState.FULL_TEMP:
-            print(f"Setting full temperature setpoint: {FULL_TEMP_SETPOINT}°F")
+            console.log_info(f"Setting full temperature setpoint: {FULL_TEMP_SETPOINT}°F")
             self.pid_controller.update_setpoint(FULL_TEMP_SETPOINT)
 
         elif state == SystemState.FULL_TEMP_COMPLETE:
-            print("Full temperature reached")
+            console.log_success("Full temperature reached")
 
         elif state == SystemState.ERROR:
             # Set SCR to minimum value for safety
             self.scr_output.real = 4.0
-            print(f"ERROR {self.safety_manager.error_code}: {self.safety_manager.error_message}")
+            console.log_error(self.safety_manager.error_message, error_code=self.safety_manager.error_code)
 
         elif state == SystemState.SHUTDOWN:
             # Begin graceful shutdown - LED patterns already set
-            pass
+            console.log_event("Beginning graceful shutdown", "SHUTDOWN")
 
     def _exit_state(self, state):
         """Perform exit actions for the given state"""
@@ -620,7 +624,7 @@ class StateMachine:
 
     def process_event(self, event):
         """Process an event based on the current state"""
-        print(f"Processing event: {event}")
+        console.log_event(f"Processing event: {event}")
 
         # Handle global events that apply in any state
         if event.type == EventType.ESTOP_ACTIVATED:
@@ -680,7 +684,7 @@ class StateMachine:
         if event is None:
             # First time entry actions
             if elapsed_time < 0.1:
-                print("Running self-check diagnostic...")
+                console.log_event("Running self-check diagnostic...", "SELF-CHECK")
                 # Run self check in a non-blocking way
                 if run_self_check(self.safety_manager, blower_monitor):
                     # Self-check complete, will wait for timeout to transition
@@ -850,12 +854,12 @@ def read_blower_temperature():
         # Read blower outlet temperature (Slot 1, Channel 2)
         temp = thm_module[2].value
         if temp is None or temp < 0 or temp > 2000:  # Sanity check
-            print(f"WARNING: Invalid blower temperature reading")
+            console.log_warning("Invalid blower temperature reading")
             return None
         return temp
     except Exception as e:
         # Just log warning, don't trigger a system error since this is for monitoring only
-        print(f"WARNING: Blower temperature reading error: {e}")
+        console.log_warning(f"Blower temperature reading error: {e}")
         return None
 
 # Function to read current safely using the 4-20mA current module
@@ -906,7 +910,7 @@ def read_current(safety_manager):
 
 # Self-check routine
 def run_self_check(safety_manager, blower_monitor):
-    print("Running self-check diagnostic...")
+    console.log_event("Running self-check diagnostic...", "SELF-CHECK")
 
     # Test all lights in sequence
     led_manager.perform_sequential_test()
@@ -921,7 +925,7 @@ def run_self_check(safety_manager, blower_monitor):
     if temp is None:
         safety_manager.set_error(11, "Failed to read temperature during self-check")
         return False
-    print(f"Initial temperature reading: {temp:.1f}°F")
+    console.log_info(f"Initial temperature reading: {temp:.1f}°F")
 
     # Check current transformer readings
     current = read_current(safety_manager)
@@ -929,15 +933,15 @@ def run_self_check(safety_manager, blower_monitor):
         # Only fail if it's a real error, not just an open circuit (which returns 0.0)
         safety_manager.set_error(12, "Failed to read current during self-check")
         return False
-    print(f"Initial current reading: {current:.2f}A")
+    console.log_info(f"Initial current reading: {current:.2f}A")
     # Display warning if current is 0 but don't fail the self-check
     if current == 0 and safety_manager.current_warning:
-        print(f"WARNING: {safety_manager.current_warning} - This is normal if system is not actively heating")
+        console.log_warning(f"{safety_manager.current_warning} - This is normal if system is not actively heating")
 
     # Check blower operation
     if blower_monitor:
         blower_success, blower_message = blower_monitor.verify_during_self_check()
-        print(f"Blower verification: {blower_message}")
+        console.log_info(f"Blower verification: {blower_message}")
 
         # If blower is required but not running, fail the self-check
         if not blower_success:
@@ -953,18 +957,18 @@ def run_self_check(safety_manager, blower_monitor):
         safety_manager.set_error(13, f"SCR output test failed: {e}")
         return False
 
-    print("Self-check complete: System ready")
+    console.log_success("Self-check complete: System ready")
     return True
 
 # Initialize P1AM Base and modules
 base = P1AM.Base()
-print("P1AM Base initialized")
+console.log_init("P1AM Base", True)
 
 # List detected modules
-print("Detected modules:")
+console.log_event("Detected modules:", "HARDWARE")
 for i in range(1, len(base.io_modules)):
     if base.io_modules[i] is not None:
-        print(f"Slot {i}: {base.io_modules[i]}")
+        console.log_hardware(f"Slot {i}", "DETECTED", f"{base.io_modules[i]}")
 
 # Configure thermocouple module for K-type on all channels
 thm_module = base[1]  # P1-04THM in slot 1
@@ -1018,6 +1022,7 @@ pid = PIDController(
 safety_manager = SafetyManager(estop_button_input)
 
 # Initialize blower monitor - after safety_manager is initialized
+# Will only be active if enabled in config.py
 blower_monitor = BlowerMonitor(
     required_states=[
         SystemState.SELF_CHECK, 
@@ -1036,38 +1041,96 @@ state_machine = StateMachine(safety_manager, led_manager, pid, scr_output)
 # Command processor needs to be initialized first
 command_processor_obj = command_processor.CommandProcessor(state_machine, safety_manager, pid, scr_output)
 
-# Initialize RS-485 serial interface for control
-# Using P1AM-SERIAL shield on TX1/RX1 with DE on D5
-# Note: Changed from D13 to D5 due to pin conflict
-serial_interface_obj = serial_interface.SerialInterface(
-    command_processor=command_processor_obj,
-    tx_pin=board.TX1,
-    rx_pin=board.RX1,
-    de_pin=board.D5,
-    baudrate=9600
-)
+# Import configuration settings
+import config
+console.log_event("Initializing hardware interfaces (config-controlled)...", "INIT")
 
-# Initialize TCP/IP network interface for data logging
-# Using P1AM-ETH shield with CS pin D4 and reset pin D6
-# Note: Changed reset pin from D5 to D6 due to pin conflict with RS-485 DE
-network_interface_obj = network_interface.NetworkInterface(
-    command_processor=command_processor_obj,
-    cs_pin=board.D4,
-    reset_pin=board.D6,
-    port=23  # Standard telnet port
-)
+# Initialize hardware interfaces based on config flags
+serial_interface_obj = None
+network_interface_obj = None
+
+# Initialize RS-485 serial interface if enabled
+if config.ENABLE_RS485_SERIAL:
+    try:
+        # Get proper pin objects for serial interface
+        tx_pin = getattr(board, config.SERIAL_TX_PIN)
+        rx_pin = getattr(board, config.SERIAL_RX_PIN)
+        de_pin = getattr(board, config.SERIAL_DE_PIN)
+        
+        print(f"Initializing RS-485 with TX={config.SERIAL_TX_PIN}, RX={config.SERIAL_RX_PIN}, DE={config.SERIAL_DE_PIN}")
+        
+        serial_interface_obj = serial_interface.SerialInterface(
+            command_processor=command_processor_obj,
+            tx_pin=tx_pin,
+            rx_pin=rx_pin,
+            de_pin=de_pin,
+            baudrate=9600
+        )
+        console.log_init("RS-485 serial interface", True)
+    except Exception as e:
+        console.log_init("RS-485 serial interface", False, str(e))
+        serial_interface_obj = None
+else:
+    console.log_hardware("RS-485 serial interface", "DISABLED", "in config")
+
+# Initialize TCP/IP network interface if enabled
+if config.ENABLE_NETWORK:
+    try:
+        network_interface_obj = network_interface.NetworkInterface(
+            command_processor=command_processor_obj,
+            cs_pin=getattr(board, config.ETH_CS_PIN),  # Get pin from config
+            reset_pin=getattr(board, config.ETH_RESET_PIN),  # Get pin from config
+            port=23  # Standard telnet port
+        )
+        console.log_init("TCP/IP network interface", True)
+    except Exception as e:
+        console.log_init("TCP/IP network interface", False, str(e))
+        network_interface_obj = None
+else:
+    console.log_hardware("TCP/IP network interface", "DISABLED", "in config")
 
 # Status reporting variables
 last_print_time = 0
-print_interval = 1.0  # Status print interval in seconds
+print_interval = 5.0  # Reduced frequency for status updates (5 seconds)
+status_throttle = 30.0  # Only print status messages every 30 seconds unless there's a change
+
+# Variables to track changes in state for event-based logging
+last_system_state = None
+last_estop_status = None
+last_blower_status = None
+last_temp = None
+last_blower_temp = None
+last_current = None
+last_output = None
+last_network_status = None
 
 # Startup time for guard period
 startup_time = time.monotonic()
 
-print("System initialized")
-print("Beginning control loop...")
-print("Press INITIALIZE button (green) to begin")
-print("Serial and network interfaces active")
+console.log_success("System initialized")
+console.log_event("Beginning control loop...")
+console.log_info("Press INITIALIZE button (green) to begin")
+
+# Hardware configuration report
+console.log_event("Hardware Configuration Report", "CONFIG")
+console.log_hardware("Blower Monitor", 
+                    "ENABLED" if config.ENABLE_BLOWER_MONITOR else "DISABLED", 
+                    f"Sensor on {config.BLOWER_SENSOR_PIN}")
+console.log_hardware("RS-485 Serial", 
+                    "ENABLED" if config.ENABLE_RS485_SERIAL else "DISABLED", 
+                    f"TX1/RX1 with DE on {config.SERIAL_DE_PIN}")
+console.log_hardware("Network Interface", 
+                    "ENABLED" if config.ENABLE_NETWORK else "DISABLED", 
+                    f"CS on {config.ETH_CS_PIN}, Reset on {config.ETH_RESET_PIN}")
+
+# Network status
+if config.ENABLE_NETWORK and network_interface_obj and hasattr(network_interface_obj, 'eth') and network_interface_obj.eth:
+    ip = network_interface_obj.eth.pretty_ip(network_interface_obj.eth.ip_address)
+    console.log_network("ONLINE", ip, 23)
+else:
+    console.log_network("OFFLINE")
+
+console.log_success("Initialization complete")
 
 # Main control loop
 while True:
@@ -1082,11 +1145,11 @@ while True:
             # Check for and process button events - only when not in manual mode
             if not command_processor_obj.manual_mode:
                 if initialize_button.get_event_and_clear():
-                    print("INITIALIZE button pressed")
+                    console.log_event("INITIALIZE button pressed", "BUTTON")
                     state_machine.process_event(Event(EventType.BUTTON_PRESSED, "INITIALIZE"))
 
                 if start_button.get_event_and_clear():
-                    print("START button pressed")
+                    console.log_event("START button pressed", "BUTTON")
                     state_machine.process_event(Event(EventType.BUTTON_PRESSED, "START"))
 
         # Check blower status - keep safety features operational in all modes
@@ -1094,9 +1157,12 @@ while True:
         if not is_blower_safe and blower_event:
             state_machine.process_event(blower_event)
 
-        # Update interfaces
-        serial_interface_obj.update()
-        network_interface_obj.update()
+        # Update interfaces if they exist
+        if serial_interface_obj:
+            serial_interface_obj.update()
+            
+        if network_interface_obj:
+            network_interface_obj.update()
         
         # Only update state machine if not in manual mode
         if not command_processor_obj.manual_mode:
@@ -1144,33 +1210,81 @@ while True:
             blower_status = "RUNNING" if blower_monitor.blower_status else "OFF"
             
             # Network status - get IP address if available
-            network_status = "DISABLED"
-            if hasattr(network_interface_obj, 'eth') and network_interface_obj.eth is not None:
-                try:
-                    ip_address = network_interface_obj.eth.pretty_ip(network_interface_obj.eth.ip_address)
-                    network_status = f"ONLINE @ {ip_address}:23"
-                except:
-                    network_status = "ERROR"
+            if config.ENABLE_NETWORK:
+                if network_interface_obj and hasattr(network_interface_obj, 'eth') and network_interface_obj.eth is not None:
+                    try:
+                        ip_address = network_interface_obj.eth.pretty_ip(network_interface_obj.eth.ip_address)
+                        network_status = f"ONLINE @ {ip_address}:23"
+                    except:
+                        network_status = "ERROR"
+                else:
+                    network_status = "FAILED"
+            else:
+                network_status = "DISABLED"
 
-            print(f"State: {state_str} | E-STOP: {estop_status} | Blower: {blower_status}")
-            print(f"Heater: {temp_str} | Blower Outlet: {blower_temp_str} | Current: {curr_str} | Output: {output_str}")
-            print(f"Network: {network_status} | Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
+            # Track if any values have changed since last status update
+            
+            # Check for state changes that should trigger immediate status updates
+            state_changed = (state_str != last_system_state)
+            estop_changed = (estop_status != last_estop_status)
+            blower_changed = (blower_status != last_blower_status)
+            
+            # Check for significant changes in sensor readings
+            temp_changed = (last_temp is None or abs(current_temp - last_temp) > 1.0) if current_temp is not None else False
+            blower_temp_changed = (last_blower_temp is None or abs(blower_temp - last_blower_temp) > 1.0) if blower_temp is not None else False
+            current_changed = (last_current is None or abs(current_reading - last_current) > 0.5) if current_reading is not None else False
+            output_changed = (last_output is None or abs(scr_output.real - last_output) > 0.5)
+            network_changed = (network_status != last_network_status)
+            
+            # Determine if we should print a status update
+            force_update = state_changed or estop_changed or blower_changed
+            value_change = temp_changed or blower_temp_changed or current_changed or output_changed or network_changed
+            time_for_update = (current_time - last_print_time >= status_throttle)
+            
+            # Update stored values
+            last_system_state = state_str
+            last_estop_status = estop_status
+            last_blower_status = blower_status
+            if current_temp is not None:
+                last_temp = current_temp
+            if blower_temp is not None:
+                last_blower_temp = blower_temp
+            if current_reading is not None:
+                last_current = current_reading
+            last_output = scr_output.real
+            last_network_status = network_status
+            
+            # Output status based on changes or throttling
+            if force_update or value_change or time_for_update:
+                # Log general state information
+                if force_update or time_for_update:
+                    console.log_info(f"State: {state_str} | E-STOP: {estop_status} | Blower: {blower_status}")
+                
+                # Log temperature and output data
+                if temp_changed or blower_temp_changed or current_changed or output_changed or time_for_update:
+                    console.log_info(f"Heater: {temp_str} | Blower Outlet: {blower_temp_str} | Current: {curr_str} | Output: {output_str}")
+                
+                # Log network and indicator status
+                if network_changed or time_for_update:
+                    # For ONLINE network status, show a more prominent display
+                    if "ONLINE @" in network_status:
+                        ip_part = network_status.split("ONLINE @")[1].strip()
+                        console.log_info(f"Network: ONLINE | Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
+                        print(f"DATA LOGGING CONNECTION: {ip_part}")
+                    else:
+                        console.log_info(f"Network: {network_status} | Indicators: Green: {green_status} | Amber: {amber_status} | Blue: {blue_status} | Red: {red_status}")
 
-            # Display any warnings (like current signal warnings) 
-            # but only show them at most once every 10 seconds to avoid console flooding
+            # Display any warnings (like current signal warnings) with throttling
             if safety_manager.current_warning:
-                current_time_int = int(current_time)
-                if not hasattr(safety_manager, 'last_warning_time') or current_time_int % 10 == 0:
-                    safety_manager.last_warning_time = current_time_int
-                    print(f"WARNING: {safety_manager.current_warning}")
+                console.log_warning(safety_manager.current_warning, throttle_seconds=10)
 
-            # Display any blower warnings
+            # Display any blower warnings with throttling
             if safety_manager.blower_warning:
-                print(f"BLOWER WARNING: {safety_manager.blower_warning}")
+                console.log_warning(f"BLOWER: {safety_manager.blower_warning}", throttle_seconds=10)
 
-            # Display any errors
+            # Display any errors - these are not throttled by default
             if safety_manager.error_code != 0:
-                print(f"ERROR {safety_manager.error_code}: {safety_manager.error_message}")
+                console.log_error(safety_manager.error_message, error_code=safety_manager.error_code)
 
             last_print_time = current_time
 
@@ -1182,6 +1296,7 @@ while True:
         if command_processor_obj.manual_mode:
             scr_output.real = 4.0
             command_processor_obj.manual_mode = False
+            console.log_error("Exiting manual mode due to exception", error_code=999)
         # Otherwise transition to error state
         else:
             state_machine.transition_to(SystemState.ERROR)
