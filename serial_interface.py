@@ -63,14 +63,6 @@ class SerialInterface:
                                  timeout=0.1, receiver_buffer_size=128)
                                  
                 print(f"UART created successfully: baudrate={baudrate}, bits=8, parity=None, stop=1")
-                
-                # Verify UART is working by checking its properties
-                actual_baudrate = uart.baudrate
-                print(f"UART actual baudrate: {actual_baudrate}")
-                
-                # Try writing a test byte to see if UART is functional
-                test_bytes = uart.write(b'\x00')
-                print(f"UART test write: {test_bytes} bytes written")
             except Exception as e:
                 raise Exception(f"Failed to create UART: {e}")
             
@@ -94,10 +86,6 @@ class SerialInterface:
             # Initialize command buffer
             self.buffer = ""
             
-            # Debug timing
-            self.last_debug_time = time.monotonic()
-            self.debug_interval = 10.0  # Print debug info every 10 seconds
-            
             # Send welcome message
             self.send_message("THOR SiC Heater Control System")
             self.send_message("RS-485 Control Interface Ready")
@@ -120,13 +108,6 @@ class SerialInterface:
             return
         
         try:
-            # Periodic debug output
-            current_time = time.monotonic()
-            if current_time - self.last_debug_time >= self.debug_interval:
-                self.last_debug_time = current_time
-                de_state = "HIGH" if self.rs485.de_pin.value else "LOW"
-                print(f"RS-485 Debug: DE pin={de_state}, in_waiting={self.rs485.in_waiting}")
-            
             # Check if data is available
             if self.rs485.in_waiting:
                 # Read available data - limit to a reasonable amount
@@ -238,14 +219,9 @@ class SerialInterface:
         if not line:
             return
             
-        # Debug output
-        print(f"RS-485 received command: '{line}'")
-        
         try:
             # Process the command
             response = self.command_processor.process_command(line)
-            # Simplified debug to save memory
-            print("RS-485 response ready")
             self.send_message(response)
         except Exception as e:
             # Handle errors

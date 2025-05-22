@@ -1167,7 +1167,7 @@ gc.collect()
 initial_free = gc.mem_free()
 console.log_info(f"Initial free memory: {initial_free} bytes")
 last_mem_check = time.monotonic()
-mem_check_interval = 30.0  # Check every 30 seconds
+mem_check_interval = 300.0  # Check every 5 minutes
 
 # Main control loop
 while True:
