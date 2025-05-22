@@ -27,3 +27,6 @@ settings.toml
 # !code.py
 # !custom_modules/*.py
 .Trash-1000
+CLAUDE.md
+minicom.cap
+console-refactor.md

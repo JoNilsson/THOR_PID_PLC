@@ -1,53 +1,88 @@
-# Current Monitoring System Upgrade
+# Current Monitoring System Documentation
 
 ## Overview
 
-This document summarizes the recent hardware and code changes made to the current monitoring system in the THOR SiC Heater Control System.
+The THOR SiC Heater Control System monitors electrical current draw to ensure safe operation and detect fault conditions. The system uses an industrial 4-20mA current transducer module to provide real-time current measurements across all heating elements.
 
-## Hardware Changes
+## Hardware Configuration
 
-- Previous configuration: Multiple separate current transformers for each phase
-- New configuration: Single module that outputs a 4-20mA standard signal
-- New module provides a pre-averaged value across all three phases
-- Connections:
-  - Positive: Channel 2 input on P1-04AD
-  - Negative: Channel 10 com input on P1-04AD
+### Current Transducer Module
+- **Type**: 4-20mA output current transformer module
+- **Range**: 0-100A (low range setting)
+- **Output**: 4mA = 0A, 20mA = 100A (linear)
+- **Connection**: 
+  - Positive: P1-04AD Channel 2 input
+  - Negative: P1-04AD Channel 10 com input
 
-## Code Changes
+### Signal Characteristics
+- **Standard**: Industrial 4-20mA current loop
+- **Resolution**: 0.00391A per bit (16-bit ADC)
+- **Update Rate**: Continuous monitoring in main loop
 
-1. Simplified `read_current()` function:
+## Software Implementation
 
-   - Now reads from a single channel (Channel 2) instead of three separate channels
-   - Directly converts 4-20mA signal to current value using proper scaling (4mA = 0A, 20mA = 100A)
-   - Removed multi-phase averaging logic as this is now handled by the hardware
+### Current Reading Function
 
-2. Added new diagnostics:
+The `read_current()` function in `code.py`:
+1. Reads raw value from P1-04AD Channel 2
+2. Converts to 4-20mA signal value
+3. Applies linear scaling to get actual current
+4. Performs signal integrity checks
 
-   - Signal integrity checks for the 4-20mA range
-   - Issues a warning for potential open circuit (signal < 3.8mA) without triggering an error
-   - Detects potential fault conditions (signal > 20.2mA)
+### Scaling Formula
+```python
+current = (mA_signal - 4.0) * (100.0 / 16.0)
+```
+Where:
+- `mA_signal` is the measured 4-20mA value
+- Result is current in amperes (0-100A range)
 
-3. Updated documentation:
-   - Added detailed comments explaining the new hardware setup
-   - Updated hardware configuration description
-   - Updated code_updates.md with changelog
+### Signal Integrity Monitoring
 
-## Benefits
+The system checks for:
+- **Open Circuit**: Signal < 3.8mA (warning only)
+- **Valid Range**: 3.8mA to 20.2mA
+- **Fault Condition**: Signal > 20.2mA (returns None)
 
-1. **Simplified Code**: Reduced code complexity by eliminating multi-phase monitoring and averaging
-2. **Improved Reliability**: Standard 4-20mA industrial signal is more noise-resistant
-3. **Better Diagnostics**: Added ability to detect signal integrity problems
-4. **Standardization**: Using industry-standard signal protocol (4-20mA)
+## Safety Features
 
-## Testing Notes
+### Overcurrent Protection
+- **Threshold**: 70.0A (configurable in code)
+- **Response**: Immediate transition to ERROR state
+- **Error Code**: 102
+- **Recovery**: Requires system reset
 
-- The current range is set to low (100A) on the module
-- System behavior should be monitored during initial deployment to verify scaling accuracy
-- The overcurrent threshold (CURRENT_THRESHOLD = 70.0A) is set to match the SiC rating for safe operation.
+### Current Warnings
+- **Range**: 60-70A generates console warnings
+- **Purpose**: Alert operator before reaching trip point
+- **Logging**: Warnings logged but don't trigger errors
 
-## Reference Documentation
+## Data Access
 
-- Original hardware refactoring plan: `ct_hardware_refactor.md`
-- Product datasheet: <https://cdn.automationdirect.com/static/specs/acuamp3act3actr.pdf>
-- Code changelog: `code_updates.md`
+### Console Display
+- Shown in periodic status updates
+- Format: "Current: XX.XXA"
 
+### Remote Access
+- **Command**: `G:CURRENT`
+- **Response**: `CURRENT:XX.XX` or `ERROR:Current read failed`
+
+### Data Logging
+- Included in CSV stream via TCP/IP interface
+- Updated every logging cycle
+- Field name: `current`
+
+## Calibration Notes
+
+- Module must be configured for correct current range
+- Scaling assumes 100A = 20mA (low range)
+- Verify scaling accuracy during commissioning
+- Consider load characteristics when setting thresholds
+
+## Error Handling
+
+Current monitoring errors are handled gracefully:
+- Read failures return None (logged as "ERROR" in data)
+- System continues operation unless overcurrent detected
+- Signal integrity issues generate appropriate warnings
+- All errors logged to console with timestamps
