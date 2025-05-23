@@ -138,8 +138,9 @@ class CommandProcessor:
             # This shouldn't happen due to the earlier check, but just in case
             return "ERROR:Invalid command format"
             
-        # Debug info
-        print(f"Command parsed - Type: {cmd_type}, Command: {cmd}")
+        # Debug info - only print non-datalog commands to avoid console flooding
+        if not (cmd_type == "G" and cmd in ["STATE", "TEMP", "BLOWER_TEMP", "CURRENT", "OUTPUT"]):
+            print(f"Command parsed - Type: {cmd_type}, Command: {cmd}")
         
         # System control commands
         if cmd_type == "C":  # Control commands
@@ -301,45 +302,18 @@ class CommandProcessor:
         Args:
             message: The action message to log
         """
-        if self.network_interface:
-            temp = read_temperature(self.safety_manager)
-            blower_temp = read_blower_temperature()
-            current = read_current(self.safety_manager)
-            temp_str = f"{temp:.1f}" if temp is not None else "ERROR"
-            blower_temp_str = f"{blower_temp:.1f}" if blower_temp is not None else "UNKNOWN"
-            curr_str = f"{current:.2f}" if current is not None else "ERROR"
-            
-            # Create CSV formatted log entry
-            timestamp = time.monotonic()
-            log_message = f"{timestamp:.1f},MANUAL_CONTROL,{message},{temp_str},{blower_temp_str},{curr_str},{self.scr_output.real:.2f}"
-            self.network_interface.log_message(log_message)
+        # Don't send duplicate logs - the periodic update() will handle data logging
+        # Just print the action to console for feedback
+        print(f"MANUAL ACTION: {message}")
             
     def update(self):
         """
         Periodic update for logging in manual mode
         Should be called in the main loop
         """
-        if self.manual_mode and self.network_interface:
-            current_time = time.monotonic()
-            
-            # Only log at specified interval
-            if current_time - self.last_log_time >= self.log_interval:
-                self.last_log_time = current_time
-                
-                # Get sensor readings
-                temp = read_temperature(self.safety_manager)
-                blower_temp = read_blower_temperature()
-                current = read_current(self.safety_manager)
-                blower_status = "RUNNING" if blower_monitor.blower_status else "OFF"
-                
-                # Format values for logging
-                temp_str = f"{temp:.1f}" if temp is not None else "ERROR"
-                blower_temp_str = f"{blower_temp:.1f}" if blower_temp is not None else "UNKNOWN"
-                curr_str = f"{current:.2f}" if current is not None else "ERROR"
-                
-                # Create CSV formatted log entry
-                log_entry = f"{current_time:.1f},MANUAL_CONTROL,{temp_str},{blower_temp_str},{curr_str},{self.scr_output.real:.2f},{blower_status}"
-                self.network_interface.log_message(log_entry)
+        # Network interface handles all periodic data logging via its own update() method
+        # This prevents duplicate logging
+        pass
 
 # Make the class directly available at the module level
 CommandProcessor = CommandProcessor
