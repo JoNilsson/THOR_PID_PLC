@@ -77,3 +77,15 @@ SERIAL_MODE_PIN = "D3"        # Port 1 Mode pin (LOW=RS485)
 # Ethernet Interface
 ETH_CS_PIN = "D5"             # Ethernet module Chip Select (using D5 as recommended)
 ETH_RESET_PIN = "D11"         # Ethernet module Reset
+
+# Network Configuration
+# Set USE_DHCP to False for static IP (needed when no router/DHCP server available)
+USE_DHCP = False
+
+# Link-Local addressing for true plug-and-play peer-to-peer
+# 169.254.x.x is specifically designed for zero-configuration networking
+# Most operating systems will automatically assign a 169.254.x.x address when no DHCP is found
+STATIC_IP = (169, 254, 100, 100)    # Easy to remember: 169.254.100.100
+STATIC_SUBNET = (255, 255, 0, 0)    # Standard link-local subnet
+STATIC_GATEWAY = (169, 254, 100, 1) # Gateway (not used in peer-to-peer)
+STATIC_DNS = (169, 254, 100, 1)     # DNS (not used in peer-to-peer)

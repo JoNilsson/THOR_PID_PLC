@@ -93,20 +93,34 @@ class NetworkInterface:
             retry_count = 3
             while retry_count > 0:
                 try:
-                    self.eth = WIZNET5K(spi, cs, reset, is_dhcp=True)
+                    self.eth = WIZNET5K(spi, cs, reset, is_dhcp=config.USE_DHCP)
                     
-                    # Use DHCP for automatic IP configuration
-                    print("Requesting IP address via DHCP...")
-                    
-                    # Wait longer for DHCP to complete
-                    time.sleep(2.0)
-                    
-                    # Verify we got a valid IP
-                    if self.eth.ip_address[0] == 0:
-                        print("No IP address assigned, retrying DHCP...")
-                        time.sleep(1.0)
-                        self.eth.ifconfig = (None, None, None, None)  # Reset config
-                        continue
+                    if config.USE_DHCP:
+                        # Use DHCP for automatic IP configuration
+                        print("Requesting IP address via DHCP...")
+                        time.sleep(2.0)
+                        
+                        # Verify we got a valid IP
+                        if self.eth.ip_address[0] == 0:
+                            print("No IP address assigned, retrying DHCP...")
+                            time.sleep(1.0)
+                            self.eth.ifconfig = (None, None, None, None)  # Reset config
+                            continue
+                    else:
+                        # Use static IP configuration
+                        print("Configuring static IP address...")
+                        print(f"  IP: {'.'.join(str(x) for x in config.STATIC_IP)}")
+                        print(f"  Subnet: {'.'.join(str(x) for x in config.STATIC_SUBNET)}")
+                        
+                        self.eth.ifconfig = (config.STATIC_IP, config.STATIC_SUBNET, 
+                                           config.STATIC_GATEWAY, config.STATIC_DNS)
+                        time.sleep(0.5)  # Give it time to configure
+                        
+                        # Verify configuration took
+                        if self.eth.ip_address[0] == 0:
+                            print("Static IP configuration failed, retrying...")
+                            time.sleep(1.0)
+                            continue
                         
                     # Successfully initialized
                     break
@@ -121,21 +135,35 @@ class NetworkInterface:
                         raise  # Re-raise the exception after all retries fail
             
             # Get IP address information
-            self.ip_address = self.eth.pretty_ip(self.eth.ip_address)
-            self.subnet_mask = self.eth.pretty_ip(self.eth.subnet_mask)
-            self.gateway_ip = self.eth.pretty_ip(self.eth.gateway_ip)
-            self.dns_server = self.eth.pretty_ip(self.eth.dns_server)
+            # The WIZnet5k library uses different attribute names depending on DHCP vs static
+            if config.USE_DHCP:
+                self.ip_address = self.eth.pretty_ip(self.eth.ip_address)
+                self.subnet_mask = self.eth.pretty_ip(self.eth.subnet_mask)
+                self.gateway_ip = self.eth.pretty_ip(self.eth.gateway_ip)
+                self.dns_server = self.eth.pretty_ip(self.eth.dns_server)
+            else:
+                # For static IP, use the configured values
+                self.ip_address = self.eth.pretty_ip(config.STATIC_IP)
+                self.subnet_mask = self.eth.pretty_ip(config.STATIC_SUBNET)
+                self.gateway_ip = self.eth.pretty_ip(config.STATIC_GATEWAY)
+                self.dns_server = self.eth.pretty_ip(config.STATIC_DNS)
             
             # Display network information
             print("="*50)
             print(f"NETWORK INTERFACE ONLINE")
             print(f"IP Address: {self.ip_address}")
             print(f"Subnet Mask: {self.subnet_mask}")
-            print(f"Gateway: {self.gateway_ip}")
-            print(f"DNS Server: {self.dns_server}")
+            
+            # Check if using link-local
+            if self.ip_address.startswith("169.254"):
+                print("\nPEER-TO-PEER MODE (Link-Local)")
+                print("No router needed - connect directly or through switch")
+            else:
+                print(f"Gateway: {self.gateway_ip}")
+                print(f"DNS Server: {self.dns_server}")
                 
             # Create socket server
-            print(f"Starting TCP server on port {port}...")
+            print(f"\nStarting TCP server on port {port}...")
             # Create a socket pool
             self.pool = socketpool.SocketPool(self.eth)
             self.server_socket = self.pool.socket()
@@ -145,7 +173,7 @@ class NetworkInterface:
             
             # Display connection information prominently
             print("="*50)
-            print(f"DATA LOGGING AVAILABLE AT: {self.ip_address}:{port}")
+            print(f"CONNECT TO: telnet {self.ip_address} {port}")
             print("="*50)
         except Exception as e:
             print(f"Error initializing network interface: {e}")
