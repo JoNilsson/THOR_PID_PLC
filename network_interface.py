@@ -37,7 +37,7 @@ class NetworkInterface:
         self.command_processor.set_network_interface(self)
         
         # CSV header for data logging
-        self.csv_header = "timestamp,state,temperature,blower_temp,current,output,blower_status"
+        self.csv_header = "elapsed_time,hours:min:sec,state,temperature_F,blower_temp_F,current_A,output_mA,blower_status"
         
         # Variable for connected client
         self.client = None
@@ -45,6 +45,11 @@ class NetworkInterface:
         self.server_socket = None  # Initialize to None for fallback mode
         self.eth = None
         self.pool = None
+        
+        # Timing for periodic data logging
+        self.last_data_send = 0
+        self.data_send_interval = 1.0  # Send data every 1 second
+        self.system_start_time = time.monotonic()  # Record boot time
         
         # Check if network interface is enabled in config
         if not config.ENABLE_NETWORK:
@@ -207,9 +212,25 @@ class NetworkInterface:
                             ip_str = str(addr[0])  # Fallback to string conversion
                     except Exception:
                         ip_str = "unknown"  # Fallback if all else fails
+                    
+                    # Silently reject invalid connections
+                    if ip_str == "0.0.0.0" or addr[1] == 0:
+                        try:
+                            self.client.close()
+                        except:
+                            pass
+                        self.client = None
+                        return
+                    
                     print(f"Network client connected from {ip_str}:{addr[1]}")
-                    self.send_message("THOR SiC Heater Control System - Data Logging Interface")
-                    self.send_message(self.csv_header)
+                    # Set a reasonable timeout for send operations
+                    self.client.settimeout(5.0)
+                    try:
+                        self.send_message("THOR SiC Heater Control System - Data Logging Interface")
+                        self.send_message(self.csv_header)
+                    except OSError as e:
+                        print(f"Failed to send welcome message: {e}")
+                        self.client = None
                 except (OSError, TimeoutError):
                     pass  # No connection available or timeout
                     
@@ -218,8 +239,8 @@ class NetworkInterface:
                 try:
                     # Check for data to read
                     try:
-                        # Handle incoming data (with timeout)
-                        self.client.settimeout(0.01)  # Very short timeout
+                        # Handle incoming data (non-blocking)
+                        self.client.setblocking(False)
                         data = self.client.recv(256)
                         if data:
                             try:
@@ -257,6 +278,21 @@ class NetworkInterface:
                     print(f"Network client disconnected: {e}")
                     self.client = None
                     self.client_buffer = ""
+                    
+            # Send periodic CSV data if client is connected
+            if self.client:
+                current_time = time.monotonic()
+                if current_time - self.last_data_send >= self.data_send_interval:
+                    self.last_data_send = current_time
+                    # Get system data and send as CSV
+                    csv_data = self._get_csv_data()
+                    if csv_data:
+                        try:
+                            self.send_message(csv_data)
+                        except OSError:
+                            # Client disconnected during data send
+                            self.client = None
+                            
         except Exception as e:
             print(f"Network interface error: {e}")
                 
@@ -297,6 +333,9 @@ class NetworkInterface:
             
         if self.client:
             try:
+                # Ensure socket is in blocking mode for sending
+                self.client.setblocking(True)
+                self.client.settimeout(5.0)
                 # Add CR+LF and encode
                 full_message = message + '\r\n'
                 self.client.send(full_message.encode('utf-8'))
@@ -305,6 +344,62 @@ class NetworkInterface:
                 print(f"Network send error: {e}")
                 self.client = None
                 
+    def _get_csv_data(self):
+        """
+        Collect system data and format as CSV
+        
+        Returns:
+            CSV formatted string with current system data
+        """
+        try:
+            # Get current system state from command processor
+            # Calculate elapsed time since system start
+            elapsed_seconds = time.monotonic() - self.system_start_time
+            
+            # Format as HH:MM:SS
+            hours = int(elapsed_seconds // 3600)
+            minutes = int((elapsed_seconds % 3600) // 60)
+            seconds = int(elapsed_seconds % 60)
+            time_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            
+            # Get state - handle both enum and string formats
+            if hasattr(self.command_processor, 'state_machine'):
+                current_state = self.command_processor.state_machine.current_state
+                if hasattr(current_state, 'name'):
+                    state = current_state.name
+                else:
+                    # Use the G:STATE command which handles the conversion
+                    state_response = self.command_processor.process_command("G:STATE")
+                    state = state_response.split(":")[-1] if "STATE:" in state_response else "UNKNOWN"
+            else:
+                state = "UNKNOWN"
+            
+            # Get temperatures
+            temp_response = self.command_processor.process_command("G:TEMP")
+            temperature = temp_response.split(":")[-1] if "TEMP:" in temp_response else "0.0"
+            
+            blower_temp_response = self.command_processor.process_command("G:BLOWER_TEMP")
+            blower_temp = blower_temp_response.split(":")[-1] if "BLOWER_TEMP:" in blower_temp_response else "0.0"
+            
+            # Get current
+            current_response = self.command_processor.process_command("G:CURRENT")
+            current = current_response.split(":")[-1] if "CURRENT:" in current_response else "0.0"
+            
+            # Get output
+            output_response = self.command_processor.process_command("G:OUTPUT")
+            output = output_response.split(":")[-1] if "OUTPUT:" in output_response else "0.0"
+            
+            # Get blower status
+            blower_status = "RUNNING" if hasattr(self.command_processor, 'blower_monitor') and self.command_processor.blower_monitor else "STOPPED"
+            
+            # Format as CSV with both elapsed seconds and human-readable time
+            csv_line = f"{elapsed_seconds:.1f},{time_str},{state},{temperature},{blower_temp},{current},{output},{blower_status}"
+            return csv_line
+            
+        except Exception as e:
+            print(f"Error collecting CSV data: {e}")
+            return None
+    
     def close(self):
         """Close the interface and release resources"""
         # Skip if Ethernet not available or if eth object is None
