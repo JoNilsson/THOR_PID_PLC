@@ -197,7 +197,16 @@ class NetworkInterface:
             if self.client is None:
                 try:
                     self.client, addr = self.server_socket.accept()
-                    ip_str = self.eth.pretty_ip(addr[0])
+                    # Handle different address formats from socket.accept()
+                    try:
+                        if isinstance(addr[0], str):
+                            ip_str = addr[0]  # Already a string
+                        elif isinstance(addr[0], tuple) and len(addr[0]) == 4:
+                            ip_str = self.eth.pretty_ip(addr[0])  # IPv4 tuple
+                        else:
+                            ip_str = str(addr[0])  # Fallback to string conversion
+                    except Exception:
+                        ip_str = "unknown"  # Fallback if all else fails
                     print(f"Network client connected from {ip_str}:{addr[1]}")
                     self.send_message("THOR SiC Heater Control System - Data Logging Interface")
                     self.send_message(self.csv_header)
