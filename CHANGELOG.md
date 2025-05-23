@@ -1,5 +1,102 @@
 # THOR SiC Heater Control System Changelog
 
+## May 22, 2025 - Network Interface Improvements and Documentation Updates
+
+### Major Changes
+
+1. **Zero-Configuration Peer-to-Peer Networking**
+   
+   - Implemented link-local addressing (169.254.100.100) for simple peer-to-peer connections
+   - No router or DHCP server required - works with direct cable or unmanaged switch
+   - Most operating systems automatically configure compatible addresses
+   - Added fallback to static IP configuration for maximum compatibility
+
+2. **Fixed Network Interface Issues**
+   
+   - Resolved "Wrong length for IPv4 address" error when accepting connections
+   - Fixed "Operation timed out" errors by properly managing socket timeouts
+   - Added validation to reject invalid connections (0.0.0.0:0)
+   - Improved socket handling with proper blocking/non-blocking mode switching
+
+3. **Added Real-Time Data Logging**
+   
+   - Implemented automatic CSV data streaming over telnet connection
+   - Data updates every second with system telemetry
+   - Enhanced timestamps with both elapsed seconds and human-readable HH:MM:SS format
+   - Fixed blower status reporting to show actual running state
+
+4. **Documentation Reorganization**
+   
+   - Created Docs directory for all technical documentation
+   - Moved all markdown files (except README and CHANGELOG) to Docs/
+   - Updated all links in README to point to new Docs/ locations
+   - Simplified network setup instructions with focus on zero-configuration
+
+5. **Serial Command Processing Fixes**
+   
+   - Fixed fragmented command handling (e.g., "S:OUTPUT" + "=5" arriving separately)
+   - Added timeout protection for incomplete commands (2-second timeout)
+   - Improved command parsing to wait for complete SET commands before processing
+   - Fixed "invalid syntax for number" errors when commands arrive in chunks
+
+### Technical Details
+
+#### Network Configuration
+
+- **Static IP**: 169.254.100.100 (link-local, zero-configuration)
+- **Subnet**: 255.255.0.0 (standard link-local subnet)
+- **Port**: 23 (telnet)
+- **Fallback**: Can switch to DHCP by setting `USE_DHCP = True` in config.py
+
+#### CSV Data Format
+
+```csv
+elapsed_time,hours:min:sec,state,temperature_F,blower_temp_F,current_A,output_mA,blower_status
+120.5,00:02:00,WARM_UP,125.3,105.2,45.67,12.50,RUNNING
+```
+
+#### Code Changes
+
+1. **network_interface.py**
+   
+   - Added link-local IP configuration (169.254.x.x)
+   - Implemented periodic CSV data sending with 1-second interval
+   - Added `_get_csv_data()` method to collect system telemetry
+   - Fixed socket timeout handling for reliable data transmission
+   - Added connection validation to reject invalid clients
+   - Enhanced error handling with proper socket mode management
+
+2. **config.py**
+   
+   - Added network configuration settings (USE_DHCP, STATIC_IP, etc.)
+   - Set default to link-local addressing for peer-to-peer simplicity
+
+3. **serial_interface.py**
+   
+   - Enhanced command completion detection for SET commands
+   - Added timeout mechanism for stale partial commands
+   - Improved buffer management to handle fragmented messages
+   - Fixed parsing logic to ensure values are present before processing
+
+4. **command_processor.py**
+   
+   - Fixed SET command parsing to use original command string
+   - Added proper handling for OUTPUT= and OUTPUT_INCREMENT= commands
+
+5. **Documentation Updates**
+   
+   - Created Docs/NETWORK_SETUP.md with simplified setup instructions
+   - Updated README.md with concise network setup synopsis
+   - Moved all technical docs to Docs/ directory for better organization
+
+### Testing Results
+
+- Peer-to-peer connection works without router using link-local addressing
+- Data streams reliably at 1 Hz with proper CSV formatting
+- Fragmented serial commands now process correctly
+- Blower status accurately reflects actual hardware state
+- Network timeouts resolved with improved socket management
+
 ## May 22, 2025 - RS-485 Communication Fixes and Memory Optimization
 
 ### Major Changes
