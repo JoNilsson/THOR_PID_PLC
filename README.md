@@ -148,57 +148,33 @@ The system can be controlled remotely using the RS-485 interface. Here's how to 
    - Success: `OK:message` or value-specific response like `TEMP:145.2`
    - Error: `ERROR:message` with specific error information
 
-### TCP/IP Data Logging Interface
+### TCP/IP Network Interface
 
-The system provides data logging and read-only monitoring via Ethernet. Here's how to set up and use it:
+The system provides a simple peer-to-peer network interface for data logging and monitoring. No router or DHCP server required!
 
-#### Hardware Setup
+#### Quick Setup
 
-1. **Required Equipment**:
+1. **Connect Hardware**:
+   - Connect P1AM-ETH to your PC using an Ethernet cable (directly or through a switch)
+   - The system uses link-local addressing: **169.254.100.100**
 
-   - Ethernet cable (CAT5e or better)
-   - Network switch or router with DHCP enabled
-   - Computer on the same network
-   - Terminal software with telnet capability (e.g., PuTTY, TeraTerm, or NetCat)
+2. **Connect from PC**:
+   ```bash
+   telnet 169.254.100.100 23
+   ```
 
-2. **Physical Connection**:
+3. **That's it!** Most operating systems will automatically configure the connection.
 
-   - Connect an Ethernet cable from the P1AM-ETH module to your network switch/router
-   - Ensure the P1AM-ETH module's status LEDs show proper link status
-   - The system will automatically acquire an IP address via DHCP
-   - **Important**: Using pins D10 (CS) and D11 (Reset) for Ethernet module control
+For detailed network setup instructions including manual configuration options, see the [Network Setup Guide](Docs/NETWORK_SETUP.md).
 
-3. **Finding the System IP Address**:
-   - The IP address is displayed on the serial console during startup
-   - If you can't access the console, check your router's DHCP client list
-   - Alternatively, use an IP scanner tool to locate the device on your network
+#### Data Format
 
-#### Connecting to the Data Logging Interface
+Once connected, the system streams CSV data:
+- Header: `timestamp,state,temperature,blower_temp,current,output,blower_status`
+- Example: `1234.5,WARM_UP,125.3,105.2,45.67,12.50,RUNNING`
+- Updates every second
 
-1. **Terminal Software Configuration**:
-
-   - Connection type: Telnet (raw TCP)
-   - Host: The IP address acquired by the system (e.g., 192.168.1.100)
-   - Port: 23 (standard telnet port)
-   - Local Echo: On (recommended)
-
-2. **Connection Test**:
-
-   - After connecting, you should see "THOR SiC Heater Control System - Data Logging Interface"
-   - The system will then send a CSV header line
-   - Data will begin streaming automatically in CSV format
-
-3. **Data Format**:
-
-   - CSV format with header: `timestamp,state,temperature,blower_temp,current,output,blower_status`
-   - Example: `1234.5,WARM_UP,125.3,105.2,45.67,12.50,RUNNING`
-   - Data updated at approximately 1-second intervals
-   - `blower_temp` field shows the temperature at the blower outlet (air output)
-
-4. **Available Commands**:
-   - The network interface accepts read-only commands (G: prefix only)
-   - Example: `G:TEMP` will return the current temperature
-   - Write operations and control commands are not accepted for safety reasons
+The interface also accepts read-only query commands (G: prefix) for safety.
 
 ### Manual Control Mode
 
