@@ -5,8 +5,8 @@ Central source of truth for hardware configuration and pin assignments
 
 # Feature Enable/Disable Flags
 ENABLE_BLOWER_MONITOR = True    # Monitor for blower operation
-ENABLE_RS485_SERIAL = True       # RS-485 serial interface 
-ENABLE_NETWORK = False          # TCP/IP network interface
+ENABLE_RS485_SERIAL = True      # RS-485 serial interface 
+ENABLE_NETWORK = True           # TCP/IP network interface
 
 # Pin Reservation System
 # Dictionary to track pin reservations
