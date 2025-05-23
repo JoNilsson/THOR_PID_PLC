@@ -389,8 +389,20 @@ class NetworkInterface:
             output_response = self.command_processor.process_command("G:OUTPUT")
             output = output_response.split(":")[-1] if "OUTPUT:" in output_response else "0.0"
             
-            # Get blower status
-            blower_status = "RUNNING" if hasattr(self.command_processor, 'blower_monitor') and self.command_processor.blower_monitor else "STOPPED"
+            # Get blower status - check the actual blower monitor state
+            try:
+                if hasattr(self.command_processor, 'blower_monitor'):
+                    # Get the blower monitor from the command processor
+                    blower_monitor = self.command_processor.blower_monitor
+                    if blower_monitor and hasattr(blower_monitor, 'is_running'):
+                        blower_status = "RUNNING" if blower_monitor.is_running() else "STOPPED"
+                    else:
+                        # Fallback - check if blower input is high
+                        blower_status = "UNKNOWN"
+                else:
+                    blower_status = "UNKNOWN"
+            except Exception:
+                blower_status = "ERROR"
             
             # Format as CSV with both elapsed seconds and human-readable time
             csv_line = f"{elapsed_seconds:.1f},{time_str},{state},{temperature},{blower_temp},{current},{output},{blower_status}"
